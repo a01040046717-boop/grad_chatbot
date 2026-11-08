@@ -238,8 +238,12 @@ LOCAL_SYSTEM = """너는 순천향대학교 SW융합대학 학생을 돕는 '졸
 LOCAL_CHECK_RULES = """
 졸업 판정 질문 규칙:
 - 점수와 충족 여부는 [판정 결과]의 값만 그대로 쓴다. 총점/필요점수, 충족 여부, 부족한 항목과 채우는 방법(회당 점수, 남은 횟수)을 정리한다.
+- 부족한 항목은 [판정 결과]의 '부족' 목록을 하나도 빠뜨리지 말고 모두 적는다. [판정 결과]에서 이수(점수를 받은) 항목을 미이수라고 하지 않는다.
 - 학생이 말한 과목·활동이 [판정 결과]의 인식 목록에 빠져 있으면 check_graduation 도구를 호출해 다시 계산한다.
   activities 는 {항목id: 값} (check=true, count=횟수, points=점수). 항목 id 는 [항목 id 목록]을 본다."""
+
+# 내 상태를 묻는 질문 (자가진단 결과를 함께 보낼지 판단)
+STATUS_Q = re.compile(r"부족|충족|남은|남았|모자|채워|채우|졸업\s*(가능|할\s*수|돼|되)|현황|내\s*점수|뭐\s*더|뭘\s*더|더\s*해야|우선순위|판정|몇\s*점")
 
 APPENDIX_MARK = "\n\n---\n"   # 이 표시 뒤(핵심 근거·출처)는 대화 기록에서 제외
 
@@ -387,7 +391,8 @@ def chat_judgement(question: str, dept: str | None, year: int | None, record: di
     res = check_graduation(dept, year, rec["courses"], rec["activities"])
     if isinstance(res, dict):
         return None, None
-    text = "지금까지 말씀하신 내용(대화 누적): " + ", ".join(describe_record(rec, spec)) + "\n" + format_result_text(res)
+    src = "자가진단 탭 입력 + 대화로 말한 내용" if record is not None else "대화 누적"
+    text = f"판정에 반영한 내용({src}): " + ", ".join(describe_record(rec, spec)) + "\n" + format_result_text(res)
     cl = credit_line(rec.get("credits"), load_requirements())
     if cl:
         text += "\n" + cl
@@ -426,8 +431,8 @@ def answer_stream(question: str, retriever: Retriever, client=None, history: lis
     system = LOCAL_SYSTEM
     if dept and year:
         system += f"\n\n[학생 프로필] 학과: {dept}, 학번: {year}"
-    if check_text and not is_check and any(w in question for w in ["부족", "충족", "졸업", "가능", "남은", "내 점수"]):
-        system += f"\n\n[학생이 자가진단 탭에서 입력한 최근 판정 결과]\n{check_text[:1500]}"
+    if check_text and not is_check and STATUS_Q.search(question):
+        system += f"\n\n[학생이 자가진단 탭에서 입력한 최근 판정 결과]\n{check_text}"
     tools = None
     if is_check and auto:
         system += LOCAL_CHECK_RULES + f"\n\n[항목 id 목록]\n{_id_hint(dept, year)}\n\n[판정 결과 (판정 엔진 계산값)]\n{auto}"

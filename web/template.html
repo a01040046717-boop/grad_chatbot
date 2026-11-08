@@ -611,17 +611,40 @@ function bestLineScore(q, c) {
   return best;
 }
 
+/* 졸업 자가진단 탭의 입력을 판정용 기록으로 (과목 리스트 + 체크·횟수·점수 + 총 이수학점) */
+const STATUS_Q = /부족|충족|남은|남았|모자|채워|채우|졸업\s*(가능|할\s*수|돼|되)|현황|내\s*점수|뭐\s*더|뭘\s*더|더\s*해야|우선순위|판정|몇\s*점/;
+function cleanActs(acts) {
+  const out = {};
+  for (const [k, v] of Object.entries(acts || {})) {
+    if (v === true || (typeof v === "number" && v > 0) || (Array.isArray(v) && v.length)) out[k] = v;
+    else if (v && typeof v === "object" && !Array.isArray(v)) {
+      const subs = Object.fromEntries(Object.entries(v.subitems || {}).filter(([, x]) => x === true || (typeof x === "number" && x > 0) || (typeof x === "string" && x)));
+      if (Object.keys(subs).length || +v.other > 0 || +v.attempts > 0 || +v.level > 0) out[k] = v.subitems ? { ...v, subitems: subs } : v;
+    }
+  }
+  return out;
+}
+function tabRecord(dept, year) {
+  if (resolveDepartment(state.dept, REQ) !== dept || +state.year !== +year) return null;
+  const rec = { dept, year, courses: parseCourseList($("#courses").value), activities: cleanActs(collectActs()), credits: state.credits };
+  return hasAny(rec) ? rec : null;
+}
+function combineRecords(tab, chat) {
+  return { dept: tab.dept, year: tab.year, courses: [...new Set([...tab.courses, ...chat.courses])],
+    activities: { ...tab.activities, ...chat.activities }, credits: chat.credits ?? tab.credits };
+}
+
 function autoJudgeMarkdown(auto) {
-  if (auto.reset) return "대화로 말씀하신 이수 기록을 모두 지웠어요. 들은 과목과 활동을 다시 말씀해 주세요.";
+  if (auto.reset) return "대화로 말씀하신 이수 기록을 모두 지웠어요. 들은 과목과 활동을 다시 말씀해 주세요." + (auto.tab ? " (졸업 자가진단 탭에 입력한 내용은 그대로예요.)" : "");
   const r = auto.res, cols = GROUPS.flatMap((g) => Object.keys(r.matrix[g]).map((c) => [g, c]));
-  const L = [`**지금까지 말씀하신 내용으로 계산한 졸업인증 판정** (${r.department} ${r.year}학번)`,
-    "반영한 내용(대화 누적): " + auto.rec.join(", "), "",
+  const L = [`**지금까지 입력·말씀하신 내용으로 계산한 졸업인증 판정** (${r.department} ${r.year}학번)`,
+    `반영한 내용(${auto.tab && auto.chat ? "자가진단 탭 입력 + 대화로 말한 내용" : auto.tab ? "자가진단 탭 입력" : "대화 누적"}): ` + auto.rec.join(", "), "",
     `**총점 ${fmt(r.totalEarned)} / ${fmt(r.totalRequired)}점 → ${r.passed ? "충족" : "미충족"}**`, "",
     "| 구분 | " + cols.map(([g, c]) => `${g.slice(0, 2)} ${c}`).join(" | ") + " | 졸업점수 |",
     "|---|" + cols.map(() => "---").join("|") + "|---|",
     "| 필요 | " + cols.map(([g, c]) => fmt(r.matrix[g][c].required)).join(" | ") + ` | ${fmt(r.totalRequired)} |`,
     "| 이수 | " + cols.map(([g, c]) => fmt(r.matrix[g][c].earned)).join(" | ") + ` | ${fmt(r.totalEarned)} |`];
-  if (r.missing.length) { L.push("", "**부족한 항목**"); r.missing.slice(0, 8).forEach((m) => L.push(`- ${m.name}: ${fmt(m.need)}점 부족 (${m.detail})`)); if (r.missing.length > 8) L.push(`- 외 ${r.missing.length - 8}개`); }
+  if (r.missing.length) { L.push("", `**부족한 항목 ${r.missing.length}개** (모두 표시)`); r.missing.forEach((m) => L.push(`- ${m.name}: ${fmt(m.need)}점 부족 (${m.detail})`)); }
   if (auto.credit) L.push("", `**${auto.credit.split(" (")[0]}** (다면적 졸업인증과 별개의 졸업요건)`);
   L.push("", "_이어서 말해도 돼요: “봉사학습도 들었어”, “학과활동 2번 더 했어”, “총 115학점이야”, “처음부터 다시”_");
   return L.join("\n");
@@ -693,10 +716,17 @@ async function ask(q) {
     if (!spec.error) {
       const key = `${spec.department}|${jy}`, base = state.records[key] || newRecord(spec.department, jy);
       const e = extractInputs(q, jd, jy, REQ);
-      if (wantsJudgement(q, e, base, spec)) {
-        const rec = mergeRecord(base, e, q, spec); state.records[key] = rec;
-        if (hasAny(rec)) { const r = checkGraduation(jd, jy, rec.courses, rec.activities, REQ); if (!r.error) auto = { rec: describeRecord(rec, spec), res: r, record: rec, credit: creditLine(rec.credits, REQ) }; }
-        else if (RESET_RE.test(q)) auto = { reset: true };
+      const said = wantsJudgement(q, e, base, spec);
+      const tab = tabRecord(spec.department, jy);           // 졸업 자가진단 탭에 체크·입력한 내용
+      if (said || (tab && STATUS_Q.test(q))) {
+        const rec = said ? mergeRecord(base, e, q, spec) : base; state.records[key] = rec;
+        if (said && RESET_RE.test(q) && !hasAny(rec)) auto = { reset: true, tab: !!tab };
+        else {
+          // 판정은 항상 '자가진단 탭 입력 + 대화로 말한 내용'을 합쳐서 (탭에서 체크한 항목을 미이수로 보지 않도록)
+          const all = tab ? combineRecords(tab, rec) : rec;
+          if (hasAny(all)) { const r = checkGraduation(jd, jy, all.courses, all.activities, REQ);
+            if (!r.error) auto = { rec: describeRecord(all, spec), res: r, record: all, credit: creditLine(all.credits, REQ), tab: !!tab, chat: hasAny(rec) }; }
+        }
       }
     }
   }

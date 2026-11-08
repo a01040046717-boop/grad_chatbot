@@ -273,20 +273,33 @@ function formatContext(hits) {
 /* ---------- 문장 → 판정 입력 자동 인식 (Python rag/extract.py 이식) ---------- */
 const KNUM = { "한": 1, "두": 2, "세": 3, "네": 4, "다섯": 5, "여섯": 6, "일곱": 7, "여덟": 8, "아홉": 9, "열": 10 };
 const NUMP = "(\\d+|다섯|여섯|일곱|여덟|아홉|한|두|세|네|열)";
-const NEGP = /^.{0,6}?(안\s*했|안\s*함|안\s*들|안\s*봤|안\s*해|못|아직|없|안\s*땄|안\s*받|불합격|떨어)/;
+const NEGP = /^.{0,6}?(안\s*했|안\s*함|안\s*들|안\s*봤|안\s*해|못|아직|없|안\s*땄|안\s*받|불합격|떨어|빼고|제외|말고)/;
 const CHECK_INTENT = /졸업\s*(가능|할\s*수|돼|되)|충족|부족|모자|남은|남았|몇\s*점|판정|채웠|채워|계산/;
-const CHECK_KEYS = [["코딩역량", ["코딩역량"]], ["AI·SW전공역량", ["ai·sw전공역량", "aisw전공역량", "aisw역량", "전공역량졸업인증", "aisw"]],
-  ["학술제", ["학술제"]], ["중핵교양", ["중핵교양"]], ["학습윤리-기본", ["학습윤리기본", "학습윤리-기본"]], ["학습윤리-심화", ["학습윤리심화", "학습윤리-심화"]],
+const CHECK_KEYS = [["코딩역량", ["코딩역량", "코딩인증"]], ["AI·SW전공역량", ["ai·sw전공역량", "aisw전공역량", "aisw역량", "전공역량졸업인증", "aisw"]],
+  ["학술제", ["학술제"]], ["중핵교양", ["중핵교양", "국제사회언어"]], ["학습윤리-기본", ["학습윤리기본", "학습윤리-기본"]], ["학습윤리-심화", ["학습윤리심화", "학습윤리-심화"]],
   ["국제박람회", ["국제박람회", "박람회"]], ["진로(취업)지도", ["진로지도", "취업지도"]], ["간담회", ["간담회"]]];
 const COUNT_KEYS = [["자기주도상담", ["자기주도상담"]], ["지도교수상담", ["지도교수상담", "교수상담"]], ["졸업상담", ["졸업상담"]],
-  ["진로 및 취업상담", ["진로및취업상담", "취업상담", "진로상담"]], ["전공상담", ["전공상담"]], ["학과활동", ["학과활동"]],
+  ["진로 및 취업상담", ["진로및취업상담", "취업상담", "진로상담"]], ["전공상담", ["전공상담"]], ["학과활동", ["학과활동", "학과행사"]],
   ["MT", ["mt", "엠티"]], ["TOPCIT", ["topcit", "탑싯"]]];
 const GOT = "(취득|땄|따|합격|획득|붙|있)", TOOK = "(응시|봤|보|쳤|치)";
+// 과목 줄임말 → 정식 과목명 (키는 norm 값)
+const COURSE_ALIASES = { "자기개발과전공탐색": ["전공탐색"], "자기개발과전공탐색mm": ["전공탐색"], "예비창업설계": ["예창"] };
+const FULL_RE = /^.{0,8}?((다|모두|전부)\s*(했|채웠|채움|참여|받았|완료|끝)|완료|만점)/;   // '자기주도상담 다 했어'
+const EXCEPT_ALL = /(빼고|제외하고|말고)\s*(나머지\s*)?(다|모두|전부)/;                    // '봉사학습 빼고 다 들었어'
+const CONTEST_JOIN = /(경진대회|공모전|해커톤)[^.,\n]{0,12}?(참가|나갔|출전|참여|나감)/;
+const CONTEST_WIN = /(경진대회|공모전|해커톤)[^.,\n]{0,12}?(수상|입상|상\s*받|상을\s*받)/;
 const knum = (s) => (/^\d+$/.test(s) ? parseInt(s, 10) : KNUM[s] || 0);
 const pat = (w) => [...w].filter((c) => !/\s/.test(c)).map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s*");
 function findCount(text, words, units = "(번|회|차례|학기)") {
   for (const w of words) { const m = text.match(new RegExp(pat(w) + "[^0-9\\n.,]{0,10}?" + NUMP + "\\s*" + units, "i")); if (m) return knum(m[1]); }
   return null;
+}
+function full(text, words) {
+  const low = text.toLowerCase();
+  for (const w of words) { const re = new RegExp(pat(w), "gi"); let m;
+    while ((m = re.exec(low))) { const after = low.slice(m.index + m[0].length);
+      if (FULL_RE.test(after.slice(0, 14)) && !NEGP.test(after.slice(0, 12))) return true; } }
+  return false;
 }
 function mentioned(text, words) {
   const low = text.toLowerCase();
@@ -309,6 +322,13 @@ function extractInputs(text, dept, year, REQ) {
     if (k && rest.includes(k)) { rest = rest.split(k).join("■"); if (negated(text, n)) continue;   // '봉사학습은 안 들었어'
       courses.push(n); recog.push(`과목 ${n}`); }
   }
+  for (const n of [...names].sort()) for (const a of COURSE_ALIASES[norm(n)] || []) {   // 줄임말 ('전공탐색', '예창')
+    if (!courses.includes(n) && rest.includes(norm(a)) && !negated(text, a)) { rest = rest.split(norm(a)).join("■"); courses.push(n); recog.push(`과목 ${n}`); }
+  }
+  if (EXCEPT_ALL.test(text)) for (const it of spec.items) if (it.type === "course") {   // 'X 빼고 다 들었어'
+    const cands = [...(it.match || [it.name]), ...(COURSE_ALIASES[norm(it.name)] || [])];
+    if (!cands.some((c) => courses.includes(c)) && !cands.some((c) => negated(text, c))) { courses.push(it.name); recog.push(`과목 ${it.name}`); }
+  }
   for (const it of spec.items) if (it.type === "choose" && it.pattern) {
     const m = text.match(new RegExp(pat(it.pattern) + "[^0-9]{0,6}" + NUMP + "\\s*(과목|개)"));
     if (m) { for (let j = 0; j < knum(m[1]); j++) courses.push(`${it.pattern}${j + 1}`); recog.push(`${it.pattern} ${knum(m[1])}과목`); }
@@ -317,9 +337,18 @@ function extractInputs(text, dept, year, REQ) {
     const nn = norm(it.name);
     if (it.type === "count") {
       for (const [core, words] of COUNT_KEYS) if (nn.includes(norm(core))) {
-        const n = findCount(text, words); if (n !== null) { acts[it.id] = n; recog.push(`${it.name.replace(/\s*\d+회$/, "")} ${n}회`); } break; }
+        const n = findCount(text, words), short = it.name.replace(/\s*\d+회$/, "");
+        if (n !== null) { acts[it.id] = n; recog.push(`${short} ${n}회`); }
+        else if (full(text, words)) { acts[it.id] = Math.ceil(it.points / it.per); recog.push(`${short} ${acts[it.id]}회 (다 했다고 해서 필요 횟수로 계산)`); }
+        break; }
     } else if (it.type === "check") {
-      for (const [core, words] of CHECK_KEYS) if (nn.includes(norm(core))) { if (mentioned(text, words)) { acts[it.id] = true; recog.push(it.name); } break; }
+      for (const [core, words] of CHECK_KEYS) if (nn.includes(norm(core))) {
+        if (mentioned(text, words)) {
+          const lv = core === "코딩역량" ? text.match(/(레벨|level|lv\.?|단계)\s*(\d)/i) : null;
+          if (lv && +lv[2] < 2) recog.push(`코딩역량인증 레벨${lv[2]} (Lv2 이상이어야 인정 → 미인정)`);   // Lv2 이상만 인정
+          else { acts[it.id] = true; recog.push(it.name); }
+        }
+        break; }
     } else if (it.type === "all_of") {
       const low = text.toLowerCase(), i = low.indexOf("asp");
       if (i >= 0 && !NEGP.test(low.slice(i + 3, i + 15))) {
@@ -350,16 +379,37 @@ function extractInputs(text, dept, year, REQ) {
         } else if (s.mode === "count") {
           const n = findCount(text, words); if (n !== null) { subs[sname] = n; recog.push(`${core} ${n}${sname.includes("학기") ? "학기" : "회"}`); }
         } else if (s.mode === "number") {
-          const m = text.match(new RegExp(pat(core) + "\\D{0,8}?(\\d+)\\s*점")); if (m) { subs[sname] = +m[1]; recog.push(`${core} ${m[1]}점`); }
+          const m = text.match(new RegExp(pat(core) + "\\D{0,8}?(\\d+)\\s*점")), lo = sname.match(/\((\d+)~/);
+          if (m) { subs[sname] = +m[1]; recog.push(`${core} ${m[1]}점`); }
+          else if (lo && ((core.endsWith("참가") && CONTEST_JOIN.test(text) && !CONTEST_WIN.test(text)) || (core.endsWith("수상") && CONTEST_WIN.test(text)))) {
+            subs[sname] = +lo[1]; recog.push(`${core} ${lo[1]}점 (점수를 말하지 않아 최소 점수로 계산)`); }
         }
       }
-      if (!(it.subitems || []).length) {
-        const core = it.name.replace(/\s*\(.*$/, ""); const m = text.match(new RegExp(pat(core) + "\\D{0,8}?(\\d+)\\s*점"));
-        if (m) { other = +m[1]; recog.push(`${core} ${m[1]}점`); }
+      if (!(it.subitems || []).length) {   // 졸업필수활동 10점 같은 직접 점수
+        const core = it.name.replace(/\s*\(.*$/, ""), cat = it.name.match(/\((공감|창의|글로벌)\)/);
+        const words = [core, ...(core.includes("자율활동") ? ["자율활동", "자율"] : [])];
+        if (cat) {   // 비교과자율활동(창의)/(글로벌): 인재상 단어 뒤의 점수만 해당 항목에
+          const m = text.includes("자율") ? text.match(new RegExp(cat[1] + "\\D{0,6}?(\\d+)\\s*점")) : null;
+          if (m) { other = +m[1]; recog.push(`${it.name} ${m[1]}점`); }
+        } else {
+          const m = words.map((w) => text.match(new RegExp(pat(w) + "\\D{0,8}?(\\d+)\\s*점"))).find((x) => x);
+          if (m) { other = +m[1]; recog.push(`${core} ${m[1]}점`); }
+          else if (full(text, [core])) { other = it.points; recog.push(`${core} ${fmtg(it.points)}점 (다 했다고 해서 만점으로 계산)`); }
+        }
       }
       if (Object.keys(subs).length || other) acts[it.id] = { subitems: subs, other };
     }
   }
+  const hasTopcit = spec.items.some((it) => it.type === "topcit_rule" || (it.type === "count" && norm(it.name).includes("topcit"))
+    || (it.subitems || []).some((s) => norm(s.name).includes("topcit")));
+  const creative = spec.items.find((it) => it.type === "points" && !(it.subitems || []).length && it.name.includes("자율활동") && it.name.includes("창의"));
+  if (!hasTopcit && creative) {   // TOPCIT 응시 회당 1점은 비교과자율활동(창의) 점수로 인정 (공식 안내)
+    const n = findCount(text, ["topcit", "탑싯"], "(번|회)");
+    if (n) { const a = acts[creative.id] || (acts[creative.id] = { subitems: {}, other: 0 }); a.other = (+a.other || 0) + n;
+      recog.push(`TOPCIT 응시 ${n}회 → ${creative.name} ${n}점`); }
+  }
+  const sang = spec.items.filter((it) => it.type === "count" && it.name.includes("상담"));   // '상담 3번' (상담 항목이 하나뿐일 때)
+  if (sang.length === 1 && !(sang[0].id in acts)) { const n = findCount(text, ["상담"]); if (n !== null) { acts[sang[0].id] = n; recog.push(`${sang[0].name} ${n}회`); } }
   const credits = extractCredits(text);
   if (credits !== null) recog.push(`총 이수학점 ${credits}학점`);
   return { courses, activities: acts, recognized: recog, credits };
@@ -380,6 +430,8 @@ function creditLine(credits, REQ) {
 
 /* ---------- 대화 누적: 여러 메시지에 나눠 말한 과목·활동을 하나의 기록으로 (Python rag/extract.py 와 같은 규칙) ---------- */
 const HYPO = /하면|한다면|했다면|으면|라면/;
+const QUESTION = /\?|몇|어떻게|뭐|무엇|언제|어디|왜|나요|까요|인가|인지|(?<!졸업)필수|해야/;
+const DONE_EXTRA = /완료|들음|받음|채움|봤어|갔어|나갔|땄음|수료/;
 const RESET_RE = /처음부터\s*다시|초기화|리셋|다\s*지워|전부\s*지워|새로\s*시작/;
 const MORE_RE = /(\d+|한|두|세|네|다섯)\s*(번|회)\s*더|더\s*(\d+|한|두|세|네|다섯)\s*(번|회)/;
 function negated(text, word) {
@@ -396,7 +448,7 @@ function recordedNegation(text, rec, spec) {
 }
 function wantsJudgement(text, ext, rec, spec) {
   if (RESET_RE.test(text) || isCheckRequest(text) || (ext.credits !== null && ext.credits !== undefined)) return true;
-  if (DONE_SIGNAL.test(text) && ext.recognized.length && !HYPO.test(text)) return true;
+  if (ext.recognized.length && !HYPO.test(text) && (DONE_SIGNAL.test(text) || DONE_EXTRA.test(text) || !QUESTION.test(text))) return true;
   return !!(rec && spec && recordedNegation(text, rec, spec));
 }
 function mergeRecord(rec, ext, text, spec) {
@@ -428,6 +480,7 @@ function describeRecord(rec, spec) {
   for (const [id, v] of Object.entries(rec.activities)) {
     const it = items[id]; if (!it) continue;
     const name = it.name, t = it.type;
+    if (t === "course" && rec.courses.some((c) => norm(c) === norm(name))) continue;   // 과목 리스트에 이미 있음
     if (t === "count") out.push(`${name.replace(/\s*\d+회$/, "")} ${fmtg(v)}회`);
     else if (t === "all_of") out.push(`${name} (${v.join(", ")})`);
     else if (t === "topcit_rule") out.push(`TOPCIT 응시 ${v.attempts || 0}회, 수준 ${v.level || 0}`);

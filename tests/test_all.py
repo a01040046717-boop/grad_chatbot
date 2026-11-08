@@ -351,6 +351,7 @@ def test_cumulative_chat_and_credits():
 def test_hybrid_embedding_faiss():
     """임베딩 + FAISS 하이브리드 검색 (실제 모델 대신 같은 인터페이스의 가짜 임베딩·FAISS로 연결 확인)"""
     import types
+    import zlib
     import numpy as np
     from rag.ingest import build_chunks
     from rag.retriever import Retriever
@@ -368,7 +369,7 @@ def test_hybrid_embedding_faiss():
         def _v(self, t):
             v = np.zeros(64, np.float32)
             for i in range(len(t) - 1):
-                v[hash(t[i:i + 2]) % 64] += 1
+                v[zlib.crc32(t[i:i + 2].encode()) % 64] += 1     # 실행마다 같은 값 (hash()는 매번 바뀜)
             return v / (np.linalg.norm(v) + 1e-9)
         def __call__(self, texts): return [self._v(t) for t in texts]
         def query(self, t): return self._v(t)
@@ -381,6 +382,27 @@ def test_hybrid_embedding_faiss():
         assert dense.shape == (len(r.chunks),) and abs(float(dense.max())) <= 1.0001
     finally:
         sys.modules.pop("faiss", None)
+
+
+def test_phrasings_and_tab_merge():
+    """다양한 말투 인식 + 잘못 계산하던 문장 + 자가진단 탭 입력과 대화 합치기(파이썬은 record 로 전달받음)"""
+    from rag.extract import extract_inputs
+    D, Y = "AI·빅데이터학과", 2022
+    ex = lambda t: extract_inputs(t, D, Y)
+    assert "coding" not in ex("코딩역량 레벨1 받았어")["activities"]                       # Lv1 은 미인정
+    assert "coding" in ex("코딩인증 Lv3 땄어")["activities"]
+    a = ex("비교과 자율활동 창의 9점")["activities"]
+    assert a["free_creative"]["other"] == 9 and "free_global" not in a                      # 창의에만
+    assert "봉사학습" not in ex("봉사학습 빼고 다 들었어")["courses"] and "인간사랑" in ex("봉사학습 빼고 다 들었어")["courses"]
+    assert ex("자기주도상담 다 했어")["activities"]["c_selfcounsel"] == 5
+    assert ex("학과행사 2번 갔어")["activities"]["dept_act"] == 2
+    assert ex("TOPCIT 2번 봤어")["activities"]["free_creative"]["other"] == 2
+    assert "자기개발과전공탐색" in ex("전공탐색 들었어")["courses"] or "자기개발과 전공탐색" in ex("전공탐색 들었어")["courses"]
+    r = build_index(verbose=False)
+    tab = {"dept": D, "year": Y, "courses": ["인간사랑", "현대기본영어", "봉사학습"],
+           "activities": {"c_asp": ["1학기", "2학기"], "c_selfcounsel": 5, "coding": True}, "credits": None}
+    a = llm.answer("뭐가 부족해?", r, None, profile={"department": D, "year": Y}, record=tab)
+    assert a.check_result["total_earned"] == 30 and "인간사랑" not in [m["name"] for m in a.check_result["missing"]]
 
 
 def test_offline_chat_judgement():
