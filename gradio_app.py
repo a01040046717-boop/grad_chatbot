@@ -9,7 +9,7 @@ import gradio as gr
 
 from rag.checker import load_requirements, get_requirement_items, check_graduation, format_result_text
 from rag.retriever import load_or_build
-from rag.llm import answer, get_client, make_embedder, model_label
+from rag.llm import answer_stream, get_client, make_embedder, model_label, APPENDIX_MARK
 
 REQ = load_requirements()
 DEPTS = list(REQ["departments"])
@@ -88,21 +88,38 @@ def build_demo(default_dept: str = "AI·빅데이터학과", default_year: int =
                          "인간사랑, 현대기본영어, 봉사학습, 예비창업설계 들었고 학과활동 3번, SQLD 땄어. 졸업 가능해?"],
                         inputs=msg)
 
+            def _final_text(a) -> str:
+                text = a.text
+                extra = []
+                if a.points:
+                    extra.append("📌 **문서에서 찾은 핵심 내용**\n" + "\n".join(f"- {l}  <sub>({src})</sub>" for l, src in a.points))
+                if a.auto_text:
+                    extra.append("<details><summary>📊 판정 엔진 계산 결과 보기</summary>\n\n```\n" + a.auto_text + "\n```\n</details>")
+                tail = []
+                if a.tool_calls:
+                    tail.append("🛠️ 도구 호출: " + " → ".join(t[0] for t in a.tool_calls))
+                if a.sources:
+                    tail.append("📎 근거: " + " · ".join(f"{s} / {l}" for s, l, _ in a.sources[:4]))
+                if tail:
+                    extra.append("<sub>" + "<br>".join(tail) + "</sub>")
+                return text + (APPENDIX_MARK + "\n\n".join(extra) if extra else "")
+
             def respond(m, hist, d, y, chk):
                 if not m.strip():
-                    return "", hist
+                    yield "", hist
+                    return
                 hist = hist or []
                 h = [{"role": x["role"], "content": _text(x["content"])} for x in hist if isinstance(x, dict)]
+                base = hist + [{"role": "user", "content": m}]
+                yield "", base + [{"role": "assistant", "content": "⏳ 문서를 찾는 중이에요…"}]
                 try:
-                    a = answer(m, retriever, client, h, {"department": d, "year": int(y)}, chk or None)
-                    text = a.text
-                    if a.tool_calls:
-                        text += "\n\n<sub>🛠️ 도구 호출: " + " → ".join(t[0] for t in a.tool_calls) + "</sub>"
-                    if a.sources:
-                        text += "\n\n<sub>📎 근거: " + " · ".join(f"{s} / {l}" for s, l, _ in a.sources[:4]) + "</sub>"
+                    for ev in answer_stream(m, retriever, client, h, {"department": d, "year": int(y)}, chk or None):
+                        if isinstance(ev, str):
+                            yield "", base + [{"role": "assistant", "content": ev + " ▌"}]
+                        else:
+                            yield "", base + [{"role": "assistant", "content": _final_text(ev)}]
                 except Exception as e:
-                    text = f"⚠️ 오류: {e}"
-                return "", hist + [{"role": "user", "content": m}, {"role": "assistant", "content": text}]
+                    yield "", base + [{"role": "assistant", "content": f"⚠️ 오류: {e}"}]
 
             msg.submit(respond, [msg, chatbot, dept, year, check_state], [msg, chatbot])
             send.click(respond, [msg, chatbot, dept, year, check_state], [msg, chatbot])

@@ -8,12 +8,17 @@ LLM 연결 + RAG 답변 생성 + Tool Calling
     search_documents   : 추가 검색
     get_requirements   : 학과·학번별 항목(id, 배점, 유형) 조회
     check_graduation   : 규칙 엔진으로 졸업요건 충족 여부 계산 (점수 계산은 LLM 이 하지 않음)
+- 무료 오픈소스 LLM(작은 모델)은 빠르고 정확하도록 별도 경로(answer_stream):
+    · 일반 질문: 도구 없이 한 번에 생성, 학과·학번 기준표와 공식 안내 위주의 짧은 컨텍스트
+    · 졸업 판정 요청: 문장 자동 인식 결과 + check_graduation 도구 1개만 제공
+    · 생성 중인 답변을 바로 화면에 보여주고(스트리밍), 문서에서 찾은 핵심 문장을 함께 표시
 - API 키가 없으면 검색 결과만 보여주는 '오프라인 모드'로 동작
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 
 from .checker import (check_graduation, format_result_text, get_requirement_items,
@@ -85,6 +90,8 @@ class Answer:
     sources: list = field(default_factory=list)       # [(source, location, score)]
     tool_calls: list = field(default_factory=list)    # [(name, args, result_preview)]
     check_result: dict | None = None
+    points: list = field(default_factory=list)        # [(문서에서 찾은 핵심 문장, 출처)]
+    auto_text: str | None = None                      # 문장 자동 인식 + 판정 엔진 결과
 
 
 # ----------------------------------------------------------------------------
@@ -186,9 +193,234 @@ def _profile_block(profile: dict | None, check_text: str | None) -> str:
     return s
 
 
+LOCAL_SYSTEM = """너는 순천향대학교 SW융합대학 학생을 돕는 '다면적 졸업인증제 상담 챗봇'이다.
+답변 방법:
+1. 첫 문장에서 질문에 대한 답을 바로 말한다.
+2. 이어서 관련 항목을 '- ' 목록으로 정리한다. 각 항목에 점수, 횟수, 조건, 구분(대학공통/학과기준), 인재상을 문서에 적힌 그대로 쓴다.
+3. 학생이 다음에 할 일(채우는 방법, 확인할 곳)을 한 줄로 덧붙인다.
+4. [참고 문서]에 있는 내용만 사용한다. 문서에 없는 내용은 "안내문에 없는 내용"이라고 말하고 多Dream비교과센터(향설 1관 RC306호) 문의를 권한다.
+5. 숫자는 문서의 값을 그대로 쓰고, 점수를 직접 더하거나 계산하지 않는다.
+6. 근거로 쓴 문서는 [문서 n]으로 표시한다.
+7. [학생 프로필]의 학과·학번 기준으로 답한다. 반드시 한국어로 답한다."""
+
+LOCAL_CHECK_RULES = """
+졸업 판정 질문 규칙:
+- 점수와 충족 여부는 [판정 결과]의 값만 그대로 쓴다. 총점/필요점수, 충족 여부, 부족한 항목과 채우는 방법(회당 점수, 남은 횟수)을 정리한다.
+- 학생이 말한 과목·활동이 [판정 결과]의 인식 목록에 빠져 있으면 check_graduation 도구를 호출해 다시 계산한다.
+  activities 는 {항목id: 값} (check=true, count=횟수, points=점수). 항목 id 는 [항목 id 목록]을 본다."""
+
+APPENDIX_MARK = "\n\n---\n"   # 이 표시 뒤(핵심 근거·출처)는 대화 기록에서 제외
+
+
+def _is_structured(c) -> bool:
+    return "학번" in c.location or c.location.startswith("대학공통")
+
+
+def _local_context(retrieved, limit: int = 3600):
+    """작은 모델용 컨텍스트: 학과·학번 기준표 → 공식 안내 → PDF 원문 순, 길이 제한."""
+    rank = lambda cs: 0 if _is_structured(cs[0]) else (1 if cs[0].source.endswith(".md") else 2)
+    picked, blocks, total = sorted(retrieved, key=rank), [], 0
+    for c, s in picked:
+        t = c.text[:1800 if _is_structured(c) else 900]
+        if blocks and total + len(t) > limit:
+            continue
+        blocks.append((c, s, t))
+        total += len(t)
+    text = "\n\n".join(f"[문서 {i}] 출처: {c.source} / {c.location}\n{t}" for i, (c, s, t) in enumerate(blocks, 1))
+    return text, [(c, s) for c, s, _ in blocks]
+
+
+_STOP = set("알려 려줘 해야 어떻 떻게 뭐가 있어 하면 는데 이야 할까 해? 가능 능해 나요 인가 건가 하나 나? 거야 에서 으로 하고 내가 해줘 줘? 몇번 몇 번".split())
+
+
+def _grams(s: str) -> set:
+    s = re.sub(r"[\s\-\[\]()·/:,.?!※—]+", "", s)
+    return {s[i:i + 2] for i in range(len(s) - 1)}
+
+
+def _lcs(a: str, b: str) -> int:
+    """두 문자열의 가장 긴 공통 부분 문자열 길이 (질문의 '학과활동' 같은 연속 일치를 우대)."""
+    best, prev = 0, [0] * (len(b) + 1)
+    for i in range(1, len(a) + 1):
+        cur = [0] * (len(b) + 1)
+        for j in range(1, len(b) + 1):
+            if a[i - 1] == b[j - 1]:
+                cur[j] = prev[j - 1] + 1
+                best = max(best, cur[j])
+        prev = cur
+    return best
+
+
+_OVERVIEW = ["전체", "총점", "합계", "몇 점", "몇점", "요건", "기준 알려", "뭐 해야", "뭘 해야"]
+
+
+def key_points(question: str, retrieved, n: int = 5) -> list[tuple[str, str]]:
+    """검색된 문서에서 질문과 가장 관련 있는 문장(줄)을 뽑는다 → (문장, 출처). LLM 과 별개로 근거를 보장."""
+    q = _grams(question) - _STOP
+    qn = re.sub(r"[\s\-\[\]()·/:,.?!※—]+", "", question)
+    out, seen = [], set()
+    if any(w in question for w in _OVERVIEW):           # 전체 기준 질문 → 기준표 요약 줄 먼저
+        for c, s in retrieved:
+            if "학번" in c.location and not c.location.startswith("대학공통"):
+                for line in c.text.split("\n"):
+                    if line.startswith(("합계", "구분:", "인재상별", "이수현황표")):
+                        out.append((line, f"{c.source} / {c.location}"))
+                        seen.add(line[:40])
+                break
+    if not q:
+        return out[:n]
+    cand = []
+    for c, s in retrieved:
+        for line in c.text.split("\n"):
+            line = line.strip().lstrip("-•· ").strip()
+            if (len(line) < 12 or line.startswith(("#", "[문서", "[순천향", "출처", "http"))
+                    or line.endswith("(SW융합대학)")):
+                continue
+            hit = len(q & _grams(line))
+            if not hit:
+                continue
+            ln = re.sub(r"[\s\-\[\]()·/:,.?!※—]+", "", line)
+            bonus = (0.2 if _is_structured(c) or c.source.endswith(".md") else 0.0) + 0.3 * min(_lcs(qn, ln), 8)
+            cand.append(((hit / (len(q) ** 0.5) + bonus) / (1 + len(line) / 400), line, f"{c.source} / {c.location}"))
+    cand.sort(key=lambda x: -x[0])
+    if cand:
+        best, n_pdf = cand[0][0], 0
+        for sc, line, src in cand:
+            k = line[:40]
+            if sc < best * 0.6 or k in seen:
+                continue
+            if " / p." in src:                  # PDF 원문 표 조각은 최대 1줄
+                if n_pdf:
+                    continue
+                n_pdf += 1
+            seen.add(k)
+            out.append((line if len(line) <= 260 else line[:257] + "…", src))
+            if len(out) >= n:
+                break
+    return out[:n]
+
+
+def _id_hint(dept: str, year: int) -> str:
+    spec = get_requirement_items(dept, year)
+    if "error" in spec:
+        return ""
+    rows = []
+    for it in spec["items"]:
+        extra = f", 회당 {it['per']}점" if it["type"] == "count" else ""
+        if it["type"] == "points" and it.get("subitems"):
+            extra = ", subitems: " + " / ".join(x["name"] for x in it["subitems"])
+        rows.append(f"{it['id']} = {it['name']} ({it['type']}{extra})")
+    return "\n".join(rows)
+
+
+def _clean_history(history):
+    out = []
+    for h in (history or [])[-4:]:
+        c = h["content"] if isinstance(h.get("content"), str) else str(h.get("content"))
+        out.append({"role": h["role"], "content": c.split(APPENDIX_MARK)[0][:1200]})
+    return out
+
+
+def _strip_special(text: str) -> str:
+    for t in ("<|im_end|>", "<|endoftext|>", "<|im_start|>"):
+        text = text.split(t)[0]
+    return re.sub(r"<\|[^>]*$", "", text)       # 생성 중간의 '<|im' 같은 조각도 숨김
+
+
+def answer_stream(question: str, retriever: Retriever, client=None, history: list[dict] | None = None,
+                  profile: dict | None = None, check_text: str | None = None, k: int = 5):
+    """화면용 스트리밍 답변. 진행 중에는 문자열(지금까지의 답변)을, 마지막에는 Answer 를 내보낸다.
+    무료 오픈소스 LLM 이 아니면 answer() 결과를 한 번에 내보낸다."""
+    if client is None or not getattr(client, "is_local", False) or not hasattr(client, "stream"):
+        yield answer(question, retriever, client, history, profile, check_text, k)
+        return
+
+    profile = profile or {}
+    dept = resolve_department(profile.get("department", "")) if profile.get("department") else None
+    year = parse_year(profile["year"]) if profile.get("year") else None
+    d2, y2 = detect_profile(question)
+    if d2 and d2 != dept:
+        dept, year = d2, y2 or year
+    elif y2:
+        year = y2
+
+    retrieved = retriever.search(question, k=k, department=dept, year=year)
+    context, used = _local_context(retrieved)
+    state = {"department": dept, "year": year, "sources": list(used), "check_result": None}
+    trace = []
+
+    is_check = bool(dept and year and is_check_request(question))
+    auto = None
+    if is_check:
+        ext = extract_inputs(question, dept, year)
+        res = check_graduation(dept, year, ext["courses"], ext["activities"])
+        if not isinstance(res, dict):
+            state["check_result"] = res.to_dict()
+            auto = ("문장에서 인식한 입력: " + (", ".join(ext["recognized"]) or "없음") + "\n" + format_result_text(res))
+            trace.append(("문장 자동 인식", {}, auto[:600]))
+
+    system = LOCAL_SYSTEM
+    if dept and year:
+        system += f"\n\n[학생 프로필] 학과: {dept}, 학번: {year}"
+    if check_text and not is_check and any(w in question for w in ["부족", "충족", "졸업", "가능", "남은", "내 점수"]):
+        system += f"\n\n[학생이 자가진단 탭에서 입력한 최근 판정 결과]\n{check_text[:1500]}"
+    tools = None
+    if is_check and auto:
+        system += LOCAL_CHECK_RULES + f"\n\n[항목 id 목록]\n{_id_hint(dept, year)}\n\n[판정 결과 (판정 엔진 계산값)]\n{auto}"
+        tools = [t for t in TOOLS if t["function"]["name"] == "check_graduation"]
+
+    messages = [{"role": "system", "content": system}] + _clean_history(history)
+    messages.append({"role": "user", "content": f"[참고 문서]\n{context}\n\n[질문]\n{question}"})
+
+    yield "⏳ 답변을 만드는 중이에요…"
+    for rnd in range(2):
+        full = ""
+        for piece in client.stream(messages, tools=tools, max_new_tokens=600 if is_check else 512):
+            full += piece
+            shown = _strip_special(full)
+            if not shown.lstrip().startswith("<"):        # 도구 호출 출력은 화면에 보이지 않음
+                yield shown
+        msg = parse_local(full, tools)
+        if not msg.tool_calls:
+            break
+        messages.append({"role": "assistant", "content": msg.content or "",
+                         "tool_calls": [tc.model_dump() for tc in msg.tool_calls]})
+        for tc in msg.tool_calls:
+            try:
+                args = json.loads(tc.function.arguments or "{}")
+                args.setdefault("department", dept)
+                args.setdefault("admission_year", year)
+                out = run_tool(tc.function.name, args, retriever, state)
+            except Exception as e:
+                args, out = {}, f"도구 실행 오류: {e}"
+            trace.append((tc.function.name, args, out[:600]))
+            messages.append({"role": "tool", "tool_call_id": tc.id, "content": out})
+        tools = None                                      # 두 번째 생성은 설명만
+        yield "⏳ 판정 엔진으로 다시 계산했어요. 결과를 정리하는 중…"
+
+    text = (msg.content or "").strip() or "(답변을 만들지 못했어요. 아래 핵심 근거를 확인해 주세요.)"
+    mine = [cs for cs in retrieved if not dept or not cs[0].department or cs[0].department == dept]
+    yield Answer(text, _dedup_sources(state["sources"]), trace, state["check_result"],
+                 points=key_points(question, mine), auto_text=auto)
+
+
+def parse_local(text: str, tools):
+    from .local_llm import parse_output
+    msg = parse_output(text)
+    if not tools:
+        msg.tool_calls = None
+    return msg
+
+
 def answer(question: str, retriever: Retriever, client=None, history: list[dict] | None = None,
            profile: dict | None = None, check_text: str | None = None, k: int = 5,
            max_tool_rounds: int = 5) -> Answer:
+    if client is not None and getattr(client, "is_local", False) and hasattr(client, "stream"):
+        final = None
+        for ev in answer_stream(question, retriever, client, history, profile, check_text, k):
+            final = ev
+        return final
+
     profile = profile or {}
     dept = resolve_department(profile.get("department", "")) if profile.get("department") else None
     year = parse_year(profile["year"]) if profile.get("year") else None

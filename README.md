@@ -24,7 +24,7 @@ pip install -r requirements.txt
 cp .env.example .env          # OPENAI_API_KEY 입력 (없으면 '오프라인 모드' = 검색 결과만 표시)
 streamlit run app.py          # 웹 UI
 python cli.py --dept AI빅데이터 --year 22    # 터미널 버전 (/check 로 자가진단)
-python tests/test_all.py      # 테스트 13개
+python tests/test_all.py      # 테스트 23개
 ```
 
 > OpenAI 대신 Upstage Solar, Ollama 등 **OpenAI 호환 API**도 `.env`의 `OPENAI_BASE_URL`, `CHAT_MODEL`, `EMBED_MODEL`만 바꾸면 사용할 수 있습니다.

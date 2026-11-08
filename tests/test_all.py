@@ -255,6 +255,31 @@ def test_sentence_extraction():
     assert is_check_request("졸업 가능해?") and not is_check_request("학과활동은 몇 번 해야 해?")
 
 
+def test_local_streaming_and_key_points():
+    """무료 LLM 경로: 일반 질문은 도구 없이 한 번에 생성(스트리밍), 답변과 함께 문서 핵심 문장 제공"""
+    from rag.local_llm import LocalLLMClient
+
+    class FakeStream(LocalLLMClient):
+        def __init__(self, outs):
+            self.outs, self.i, self.is_local, self.model_name, self.seen = outs, 0, True, "fake", []
+        def stream(self, messages, tools=None, max_new_tokens=None):
+            self.seen.append(bool(tools))
+            out = self.outs[self.i]; self.i += 1
+            for k in range(0, len(out), 5):
+                yield out[k:k + 5]
+    r = build_index(verbose=False)
+    c = FakeStream(["학과활동은 5회 참여하면 5점이에요 [문서 1].<|im_end|>"])
+    evs = list(llm.answer_stream("학과활동은 몇 번 참여해야 해?", r, c, [],
+                                 {"department": "AI·빅데이터학과", "year": 2022}))
+    partial, a = [e for e in evs if isinstance(e, str)], evs[-1]
+    assert len(partial) > 3 and not any("<|" in p for p in partial)      # 글자가 나눠서 표시됨
+    assert c.seen == [False] and a.text.startswith("학과활동은 5회")      # 일반 질문은 도구 없이 1회 생성
+    assert any("학과활동" in l and "회당 1점" in l for l, _ in a.points)
+    pts = llm.key_points("내 학번 졸업인증 기준 전체 알려줘",
+                         r.search("내 학번 졸업인증 기준 전체 알려줘", k=5, department="AI·빅데이터학과", year=2022))
+    assert pts[0][0].startswith("합계 95점")
+
+
 def test_offline_chat_judgement():
     """LLM 없이도 채팅 문장으로 졸업 판정 결과를 답한다"""
     r = build_index(verbose=False)
