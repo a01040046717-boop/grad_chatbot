@@ -46,7 +46,8 @@ def _yr(y0, y1) -> str:
 
 
 def _item_line(it: dict) -> str:
-    sec = it.get("section") or f"대학공통·{'교과' if it['type'] == 'course' else '비교과'}"
+    sec = it.get("section") or (f"{it['group']}·{it['kind']}" if it.get("group")
+                                else f"대학공통·{'교과' if it['type'] == 'course' else '비교과'}")
     s = f"- [{sec}/{it['category']}] {it['name']} ({it['points']:g}점)"
     if it["type"] == "count":
         s += f" — 회당 {it['per']}점, {-(-it['points'] // it['per'])}{it.get('unit', '회')} 필요"
@@ -104,7 +105,11 @@ def structured_chunks() -> list[Chunk]:
 
     for c in req["common"]:
         y0, y1 = c["years"]
-        txt = (f"대학공통 필수 항목 ({_yr(y0, y1)}학번, 모든 학과 공통, 합계 45점, 교과·비교과로 구분)\n"
+        uni = sum(i["points"] for i in c["items"] if i.get("group") != "학과기준")
+        grad = [i for i in c["items"] if i.get("group") == "학과기준"]
+        txt = (f"대학공통 필수 항목 ({_yr(y0, y1)}학번, 모든 학과 공통, 대학공통 {uni:g}점 = 교과 + 비교과)\n"
+               + "".join(f"※ {g['name']}({g['points']:g}점)은 안내문 PDF에서는 대학공통 표에 있지만, 학교 시스템 이수현황에서는 "
+                         f"학과기준의 '졸업필수활동'으로 집계됩니다.\n" for g in grad)
                + "\n".join(_item_line(i) for i in c["items"]))
         out.append(Chunk(_cid("common", y0), txt, meta["source"], f"대학공통 {_yr(y0, y1)}학번", "", (y0, y1)))
 
@@ -126,7 +131,8 @@ def structured_chunks() -> list[Chunk]:
                    + _category_line(dept, y0, req) + "\n"
                    "학과 기준 항목:\n" + "\n".join(_item_line(i) for i in dept_items))
             for m in moved:
-                txt += f"\n※ {m['name']}은(는) 이 학과·학번에서 대학공통이 아닌 학과기준({m['kind']})으로 분류됩니다."
+                txt += (f"\n※ {m['name']}({m['points']:g}점)은 안내문 PDF에서는 대학공통 표에 있지만, "
+                        f"학교 시스템 이수현황 기준으로 학과기준({m['kind']})으로 집계합니다.")
             if info.get("unit_rules"):
                 txt += f"\n점수 산정: {info['unit_rules']}"
             for n in info.get("notes", []):

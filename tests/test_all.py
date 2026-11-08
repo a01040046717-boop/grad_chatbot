@@ -22,8 +22,11 @@ def test_totals_match_pdf():
             for y in range(t["years"][0], t["years"][1] + 1):
                 items = get_requirement_items(dept, y, REQ)["items"]
                 assert sum(i["points"] for i in items) == t["total"], (dept, y)
-                assert sum(i["points"] for i in items if i["group"] == "대학공통") == t["subtotals"]["대학공통"], (dept, y)
-                for k in DEPT_KINDS:
+                # PDF 표의 '대학공통' = 시스템 기준 대학공통 + 졸업필수활동(학과기준으로 집계)
+                uni = sum(i["points"] for i in items if i["group"] == "대학공통")
+                grad = sum(i["points"] for i in items if i["kind"] == "졸업필수활동")
+                assert uni + grad == t["subtotals"]["대학공통"] and grad in (13, 15), (dept, y)
+                for k in [k for k in DEPT_KINDS if k != "졸업필수활동"]:
                     got = sum(i["points"] for i in items if i["group"] == "학과기준" and i["kind"] == k)
                     assert got == t["subtotals"].get(k, 0), (dept, y, k)
 
@@ -81,8 +84,12 @@ def test_two_level_sections():
     assert {k: v["required"] for k, v in r.by_kind.items()} == {
         "대학공통·교과": 20, "대학공통·비교과": 10, "학과기준·교과": 10,
         "학과기준·졸업필수활동": 15, "학과기준·비교과지정": 21, "학과기준·비교과미지정": 19}
-    r = check_graduation("컴소", 2023, "", {})                 # 다른 학과는 대학공통 45 유지
-    assert r.by_group["대학공통"]["required"] == 45
+    # 모든 학과·학번: 졸업필수활동류(졸업필수활동/졸업종합지도/졸업및취·창업지도)는 학과기준으로 집계
+    for d, y, uni, grad in [("컴소", 2021, 30, 15), ("정보보호", 2023, 30, 15), ("사물인터넷", 2024, 32, 13),
+                            ("메타버스", 2026, 32, 13), ("의료IT", 2022, 30, 15)]:
+        r = check_graduation(d, y, "", {})
+        assert r.by_group["대학공통"]["required"] == uni, (d, y)
+        assert r.by_kind["학과기준·졸업필수활동"]["required"] == grad, (d, y)
 
 
 def test_status_matrix_matches_school_system():

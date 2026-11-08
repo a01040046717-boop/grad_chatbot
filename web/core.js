@@ -65,7 +65,7 @@ function getRequirementItems(dept, year, REQ) {
   // 구분 2단계: 대학공통(교과·비교과) / 학과기준(교과·졸업필수활동·비교과지정·비교과미지정)
   const ov = track.common_overrides || {};
   const items = [
-    ...common.items.map((it) => ({ ...it, group: "대학공통", kind: it.type === "course" ? "교과" : "비교과", ...(ov[it.id] || {}) })),
+    ...common.items.map((it) => ({ ...it, ...(it.group === "학과기준" ? {} : { group: "대학공통", kind: it.type === "course" ? "교과" : "비교과" }), ...(ov[it.id] || {}) })),
     ...track.items.map((it) => ({ ...it, group: "학과기준" })),
   ].map((it) => ({ ...it, section: `${it.group}·${it.kind}` }));
   const groups = Object.fromEntries(GROUPS.map((g) => [g, items.filter((i) => i.group === g).reduce((a, i) => a + i.points, 0)]));

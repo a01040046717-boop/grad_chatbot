@@ -141,8 +141,9 @@ def get_requirement_items(dept: str, year: int, req: dict | None = None) -> dict
     items = []
     overrides = track.get("common_overrides", {})
     for it in copy.deepcopy(common):
-        it["group"] = "대학공통"
-        it["kind"] = "교과" if it["type"] == "course" else "비교과"
+        if it.get("group") != "학과기준":   # 졸업필수활동류는 데이터에 학과기준으로 지정되어 있음
+            it["group"] = "대학공통"
+            it["kind"] = "교과" if it["type"] == "course" else "비교과"
         it.update(overrides.get(it["id"], {}))
         items.append(it)
     for it in copy.deepcopy(track["items"]):
