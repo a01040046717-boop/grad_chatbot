@@ -106,7 +106,7 @@ rag/ingest.py          문서 로딩·청크 분할·구조화 청크 생성
 rag/retriever.py       하이브리드 검색 + 인덱스 캐시(index/)
 rag/llm.py             프롬프트, tool calling 루프, 오프라인 모드
 rag/checker.py         졸업요건 규칙 엔진
-data/requirements.json PDF 표 구조화 데이터 (대학공통 3종 + 6개 학과 18개 학번 구간)
+data/requirements.json PDF 표 구조화 데이터 (대학공통 3종 + 6개 학과 21개 학번 구간)
 docs/                  RAG 원문 문서 (여기에 다른 안내문 추가)
 tests/test_all.py      데이터 무결성·판정·검색·LLM 루프(가짜 클라이언트) 테스트
 ```
