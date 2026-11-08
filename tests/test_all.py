@@ -44,7 +44,7 @@ FULL_AIBD_2022 = dict(
     activities={
         "c_asp": ["1학기", "2학기"], "c_selfcounsel": 5, "c_gradact": 15,
         "dept_act": 5, "cert_contest": {"subitems": {"SQL개발자(SQLD) 취득": True}},
-        "coding": True, "aisw": True, "free_creative": 4, "core_lang": True, "free_global": 15,
+        "coding": True, "aisw": True, "free_creative": 9, "core_lang": True, "free_global": 10,
     })
 
 
@@ -91,7 +91,7 @@ def test_topcit_level_select():
 def test_points_cap_and_count():
     r = check_graduation("AI빅데이터", 2022, "", {"dept_act": 99, "free_global": 30})
     it = {i["id"]: i for i in r.items}
-    assert it["dept_act"]["earned"] == 5 and it["free_global"]["earned"] == 15
+    assert it["dept_act"]["earned"] == 5 and it["free_global"]["earned"] == 10
 
 
 def test_choose_and_substitute():

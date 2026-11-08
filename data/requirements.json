@@ -1622,18 +1622,6 @@
        "points": 5
       },
       {
-       "id": "startup",
-       "name": "예비창업설계",
-       "category": "융합하는 창의인재",
-       "kind": "교과",
-       "type": "course",
-       "points": 5,
-       "match": [
-        "예비창업설계"
-       ],
-       "note": "권장수강학기: 2학년 2학기"
-      },
-      {
        "id": "cert_contest",
        "name": "자격증/경진대회참가/경진대회수상",
        "category": "융합하는 창의인재",
@@ -1703,8 +1691,21 @@
        "category": "융합하는 창의인재",
        "kind": "비교과미지정",
        "type": "points",
-       "points": 4,
-       "subitems": []
+       "points": 9,
+       "subitems": [],
+       "note": "비교과일람표(학생 확인) 기준 · 안내문 PDF 표와 다름 (PDF: 공감 5·창의 4·글로벌 10, 일람표: 공감 없음·창의 9·글로벌 10)"
+      },
+      {
+       "id": "startup",
+       "name": "예비창업설계",
+       "category": "공헌하는 글로벌인재",
+       "kind": "교과",
+       "type": "course",
+       "points": 5,
+       "match": [
+        "예비창업설계"
+       ],
+       "note": "권장수강학기: 2학년 2학기 · 인재상: 글로벌 (비교과일람표 기준, PDF 표에는 창의로 표기)"
       },
       {
        "id": "core_lang",
@@ -1721,9 +1722,8 @@
        "category": "공헌하는 글로벌인재",
        "kind": "비교과미지정",
        "type": "points",
-       "points": 15,
-       "subitems": [],
-       "note": "비교과일람표(학생 확인) 기준: 비교과미지정에 공감 항목 없이 창의 4점·글로벌 15점 (안내문 PDF 표에는 공감 5점·창의 4점·글로벌 10점으로 표기)"
+       "points": 10,
+       "subitems": []
       }
      ]
     },
