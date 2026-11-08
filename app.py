@@ -99,6 +99,9 @@ with tab_check:
     else:
         st.subheader(f"{dept} {year}학번 · 기준 {spec['total']}점")
         st.caption(" · ".join(f"{k} {v}점" for k, v in spec["subtotals"].items()))
+        st.caption("인재상별: " + " · ".join(
+            f"{c} {sum(i['points'] for i in spec['items'] if i['category'] == c):g}점"
+            for c in ["소통하는 공감인재", "융합하는 창의인재", "공헌하는 글로벌인재"]))
         for w in spec["warnings"]:
             st.warning(w)
 
@@ -189,9 +192,17 @@ with tab_check:
             m1.metric("총점", f"{res.total_earned:g} / {res.total_required:g}")
             m2.metric("판정", "충족 ✅" if res.passed else "미충족 ❌")
             m3.metric("부족 항목", f"{len(res.missing)}개")
-            for k, v in res.by_kind.items():
-                ratio = v["earned"] / v["required"] if v["required"] else 1
-                st.progress(min(ratio, 1.0), text=f"{k}: {v['earned']:g} / {v['required']:g}")
+            col_k, col_c = st.columns(2)
+            with col_k:
+                st.markdown("**구분별**")
+                for k, v in res.by_kind.items():
+                    ratio = v["earned"] / v["required"] if v["required"] else 1
+                    st.progress(min(ratio, 1.0), text=f"{k}: {v['earned']:g} / {v['required']:g}")
+            with col_c:
+                st.markdown("**인재상별**")
+                for k, v in res.by_category.items():
+                    ratio = v["earned"] / v["required"] if v["required"] else 1
+                    st.progress(min(ratio, 1.0), text=f"{k}: {v['earned']:g} / {v['required']:g}")
 
             if res.missing:
                 st.markdown("#### ❗ 부족한 항목")
@@ -203,7 +214,7 @@ with tab_check:
                 st.balloons()
                 st.success("모든 항목을 충족했습니다! 공식 확인은 종합정보시스템 → 비교과일람표에서 하세요.")
             with st.expander("전체 항목 상세"):
-                st.dataframe([{"구분": i["kind"], "항목": i["name"], "필요": i["required"], "취득": i["earned"],
+                st.dataframe([{"구분": i["kind"], "인재상": i["category"], "항목": i["name"], "필요": i["required"], "취득": i["earned"],
                                "충족": "✅" if i["passed"] else "❌", "근거": i["detail"]} for i in res.items],
                              use_container_width=True, hide_index=True)
             if res.unmatched_courses:

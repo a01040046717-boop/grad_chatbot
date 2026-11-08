@@ -73,6 +73,13 @@ def _item_line(it: dict) -> str:
     return s
 
 
+def _category_line(dept: str, year: int, req: dict) -> str:
+    from .checker import get_requirement_items, CATEGORIES
+    items = get_requirement_items(dept, year, req)["items"]
+    return "인재상별 배점(대학공통 포함): " + ", ".join(
+        f"{c} {sum(i['points'] for i in items if i['category'] == c):g}점" for c in CATEGORIES)
+
+
 def structured_chunks() -> list[Chunk]:
     req = load_requirements()
     meta = req["meta"]
@@ -102,6 +109,7 @@ def structured_chunks() -> list[Chunk]:
             txt = (f"{dept} {_yr(y0, y1)}학번 다면적 졸업인증제 기준 (SW융합대학)\n"
                    f"합계 {t['total']}점 = 대학공통 {st['대학공통']} + 교과 {st['교과']} + "
                    f"비교과지정 {st['비교과지정']} + 비교과미지정 {st['비교과미지정']}\n"
+                   + _category_line(dept, y0, req) + "\n"
                    "학과 기준 항목:\n" + "\n".join(_item_line(i) for i in t["items"]))
             if info.get("unit_rules"):
                 txt += f"\n점수 산정: {info['unit_rules']}"

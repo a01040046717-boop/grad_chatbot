@@ -111,6 +111,14 @@ aside.sticky { position: sticky; top: 12px; }
 .kinds { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 12px 0 4px; }
 .kinds div { background: var(--bg); border-radius: 8px; padding: 6px 8px; font-size: 12px; color: var(--muted); }
 .kinds strong { display: block; color: var(--ink); font-size: 16px; font-variant-numeric: tabular-nums; }
+.kinds.cats { grid-template-columns: repeat(3, 1fr); margin-top: 0; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-top: 12px; }
+.seg button { border: 0; background: transparent; padding: 4px 12px; font-size: 12.5px; cursor: pointer; color: var(--muted); }
+.seg button.on { background: var(--accent); color: #fff; }
+.cat { display: inline-block; font-size: 11px; font-weight: 700; border-radius: 4px; padding: 0 5px; margin-right: 6px; vertical-align: 1px; }
+.cat.c0 { color: var(--stamp); background: var(--bad-soft); }
+.cat.c1 { color: var(--accent); background: var(--accent-soft); }
+.cat.c2 { color: var(--ok); background: var(--ok-soft); }
 .req-group h3 { font-size: 13px; color: var(--muted); margin: 14px 0 6px; font-weight: 600; }
 .req-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13.5px; }
 .req-list li { display: flex; justify-content: space-between; gap: 10px; }
@@ -230,6 +238,7 @@ const INDEX = buildIndex(JSON.parse(document.getElementById("chunk-data").textCo
 const DEPTS = Object.keys(REQ.departments);
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const CAT_SHORT = { "소통하는 공감인재": "공감인재", "융합하는 창의인재": "창의인재", "공헌하는 글로벌인재": "글로벌인재" };
 const fmt = (n) => (Math.round(n * 100) / 100).toString();
 
 const store = { get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
@@ -239,7 +248,7 @@ const state = {
   dept: store.get("grad.dept", "AI·빅데이터학과"),
   year: store.get("grad.year", 2022),
   history: [],          // [{role, content}]
-  acts: {}, touched: false, lastCheck: null,
+  acts: {}, touched: false, lastCheck: null, view: "kind",
   busy: false,
 };
 if (!DEPTS.includes(state.dept)) state.dept = "AI·빅데이터학과";
@@ -287,6 +296,7 @@ function renderReqPanel() {
     <div class="panel-b">
       <div class="total"><b>${s.total}</b><span class="muted">점 필요</span></div>
       <div class="kinds">${KINDS.map((k) => `<div>${k}<strong>${s.subtotals[k]}</strong></div>`).join("")}</div>
+      <div class="kinds cats">${CATEGORIES.map((c) => `<div>${CAT_SHORT[c]}<strong>${fmt(s.items.filter((i) => i.category === c).reduce((a, i) => a + i.points, 0))}</strong></div>`).join("")}</div>
       ${groups}
       ${s.unitRules ? `<p class="note">점수 산정: ${esc(s.unitRules)}</p>` : ""}
       ${s.notes.map((n) => `<p class="note">※ ${esc(n)}</p>`).join("")}
@@ -331,7 +341,7 @@ function renderForm() {
                 <label class="small">최고 수준 <select id="${id}-lv" data-id="${it.id}" data-t="lv">${[0, 1, 2, 3, 4, 5].map((l) => `<option value="${l}">Lv${l}</option>`).join("")}</select></label>`;
         hint = "응시 5회 / 응시 3회+Lv2 / 응시 1회+Lv3 / Lv4 중 하나";
       }
-      html.push(`<div class="item" id="row-${it.id}"><span class="name">${esc(it.name)} <span class="score" id="sc-${it.id}">0 / ${fmt(it.points)}점</span></span><span class="ctrl">${ctrl}</span>${hint ? `<span class="hint">${esc(hint)}</span>` : ""}${extra}</div>`);
+      html.push(`<div class="item" id="row-${it.id}"><span class="name"><span class="cat c${CATEGORIES.indexOf(it.category)}">${CAT_SHORT[it.category].replace("인재", "")}</span>${esc(it.name)} <span class="score" id="sc-${it.id}">0 / ${fmt(it.points)}점</span></span><span class="ctrl">${ctrl}</span>${hint ? `<span class="hint">${esc(hint)}</span>` : ""}${extra}</div>`);
     }
     html.push(`</div>`);
   }
@@ -378,13 +388,19 @@ function recompute() {
     <div class="panel-b">
       <div class="verdict"><div class="total"><b>${fmt(r.totalEarned)}</b><span class="muted">/ ${fmt(r.totalRequired)}점</span></div>
         <span class="stamp ${r.passed ? "pass" : "fail"}">${r.passed ? "졸업인증 충족" : "미충족"}</span></div>
-      <div class="bars">${KINDS.map((k) => { const v = r.byKind[k], p = v.required ? Math.min(100, (v.earned / v.required) * 100) : 100;
+      <div class="seg" role="tablist" aria-label="점수 보기 기준">
+        <button type="button" class="${state.view === "cat" ? "" : "on"}" data-view="kind">구분별</button>
+        <button type="button" class="${state.view === "cat" ? "on" : ""}" data-view="cat">인재상별</button>
+      </div>
+      <div class="bars">${(state.view === "cat" ? CATEGORIES.map((c) => [CAT_SHORT[c], r.byCategory[c]]) : KINDS.map((k) => [k, r.byKind[k]])).map(([k, v]) => {
+        const p = v.required ? Math.min(100, (v.earned / v.required) * 100) : 100;
         return `<div class="bar ${p >= 100 ? "full" : ""}"><div class="lab"><span>${k}</span><span>${fmt(v.earned)} / ${fmt(v.required)}</span></div><div class="track"><div class="fill" style="width:${p}%"></div></div></div>`; }).join("")}</div>
       ${r.missing.length ? `<h3 class="small" style="margin:0 0 6px">부족한 항목 ${r.missing.length}개</h3><ul class="missing">${r.missing.map((m) =>
-        `<li>${esc(m.name)} <b>−${fmt(m.need)}점</b><span class="d">${esc(m.kind)} · ${esc(m.detail)}</span></li>`).join("")}</ul>` : `<p>모든 항목을 채웠습니다. 비교과일람표에서 공식 이수내역을 확인하세요.</p>`}
+        `<li>${esc(m.name)} <b>−${fmt(m.need)}점</b><span class="d">${esc(m.kind)} · ${esc(CAT_SHORT[m.category])} · ${esc(m.detail)}</span></li>`).join("")}</ul>` : `<p>모든 항목을 채웠습니다. 비교과일람표에서 공식 이수내역을 확인하세요.</p>`}
       ${r.unmatchedCourses.length ? `<p class="note">졸업인증 항목과 관계없는 과목: ${r.unmatchedCourses.map(esc).join(", ")}</p>` : ""}
       <div class="actions"><button class="btn" id="ask-missing" type="button">부족한 부분 챗봇에게 묻기</button></div>
     </div>`;
+  document.querySelectorAll("#result .seg button").forEach((b) => b.onclick = () => { state.view = b.dataset.view; recompute(); });
   $("#ask-missing").onclick = () => { state.touched = true; location.hash = "#chat"; ask("자가진단 결과에서 부족한 항목을 어떻게 채우면 되는지 우선순위대로 알려줘."); };
 }
 $("#courses").addEventListener("input", () => { state.touched = true; store.set("grad.courses", $("#courses").value); recompute(); });

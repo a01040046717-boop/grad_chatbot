@@ -1,5 +1,6 @@
 /* ===== 졸업요건 RAG 코어 (Python rag/ 모듈의 브라우저 이식) ===== */
 const KINDS = ["대학공통", "교과", "비교과지정", "비교과미지정"];
+const CATEGORIES = ["소통하는 공감인재", "융합하는 창의인재", "공헌하는 글로벌인재"];
 
 function norm(s) {
   s = String(s ?? "");
@@ -138,10 +139,14 @@ function checkGraduation(department, year, courses, activities, REQ) {
   for (const k of KINDS) byKind[k] = {
     required: items.filter((r) => r.kind === k).reduce((a, r) => a + r.required, 0),
     earned: items.filter((r) => r.kind === k).reduce((a, r) => a + r.earned, 0) };
+  const byCategory = {};
+  for (const c of CATEGORIES) byCategory[c] = {
+    required: items.filter((r) => r.category === c).reduce((a, r) => a + r.required, 0),
+    earned: Math.round(items.filter((r) => r.category === c).reduce((a, r) => a + r.earned, 0) * 100) / 100 };
   const totalReq = items.reduce((a, r) => a + r.required, 0);
   const totalEarned = Math.round(items.reduce((a, r) => a + r.earned, 0) * 100) / 100;
   return { department: dept, year: y, totalRequired: totalReq, totalEarned, passed: items.every((r) => r.passed),
-    byKind, items,
+    byKind, byCategory, items,
     missing: items.filter((r) => !r.passed).map((r) => ({ name: r.name, kind: r.kind, category: r.category,
       need: Math.round((r.required - r.earned) * 100) / 100, detail: r.detail })),
     unmatchedCourses: list.filter((c) => !used.has(c)), warnings: spec.warnings,
@@ -152,8 +157,9 @@ function formatResultText(r) {
   if (r.error) return "⚠️ " + r.error;
   const L = [`[${r.department} ${r.year}학번] 다면적 졸업인증제 판정`,
     `총점 ${r.totalEarned} / ${r.totalRequired}  →  ${r.passed ? "✅ 충족" : "❌ 미충족"}`,
-    "구분별: " + KINDS.map((k) => `${k} ${r.byKind[k].earned}/${r.byKind[k].required}`).join(", ")];
-  if (r.missing.length) { L.push("부족한 항목:"); r.missing.forEach((m) => L.push(`  - [${m.kind}] ${m.name}: ${m.need}점 부족 (${m.detail})`)); }
+    "구분별: " + KINDS.map((k) => `${k} ${r.byKind[k].earned}/${r.byKind[k].required}`).join(", "),
+    "인재상별: " + CATEGORIES.map((c) => `${c} ${r.byCategory[c].earned}/${r.byCategory[c].required}`).join(", ")];
+  if (r.missing.length) { L.push("부족한 항목:"); r.missing.forEach((m) => L.push(`  - [${m.kind}/${m.category}] ${m.name}: ${m.need}점 부족 (${m.detail})`)); }
   if (r.unmatchedCourses.length) L.push("졸업인증 항목과 무관한 수강 과목: " + r.unmatchedCourses.join(", "));
   r.warnings.forEach((w) => L.push("※ " + w));
   return L.join("\n");
@@ -234,5 +240,5 @@ function formatContext(hits) {
   return hits.map((h, i) => `[문서 ${i + 1}] 출처: ${h.chunk.source} / ${h.chunk.location}\n${h.chunk.text}`).join("\n\n");
 }
 
-if (typeof module !== "undefined") module.exports = { norm, parseCourseList, resolveDepartment, parseYear, getRequirementItems,
+if (typeof module !== "undefined") module.exports = { CATEGORIES, norm, parseCourseList, resolveDepartment, parseYear, getRequirementItems,
   checkGraduation, formatResultText, compactRequirements, buildIndex, search, detectProfile, KINDS };

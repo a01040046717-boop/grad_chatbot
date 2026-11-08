@@ -24,6 +24,7 @@ from typing import Any
 
 DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "requirements.json"
 KINDS = ["대학공통", "교과", "비교과지정", "비교과미지정"]
+CATEGORIES = ["소통하는 공감인재", "융합하는 창의인재", "공헌하는 글로벌인재"]
 
 
 # ----------------------------------------------------------------------------
@@ -161,6 +162,7 @@ class CheckResult:
     total_earned: float
     passed: bool
     by_kind: dict = field(default_factory=dict)
+    by_category: dict = field(default_factory=dict)
     items: list = field(default_factory=list)
     missing: list = field(default_factory=list)
     unmatched_courses: list = field(default_factory=list)
@@ -285,6 +287,11 @@ def check_graduation(department: str, year: Any, courses: str | list[str] | None
         ear_k = sum(r.earned for r in results if r.kind == k)
         by_kind[k] = {"required": req_k, "earned": ear_k}
 
+    by_category = {}
+    for c in CATEGORIES:
+        by_category[c] = {"required": sum(r.required for r in results if r.category == c),
+                          "earned": round(sum(r.earned for r in results if r.category == c), 2)}
+
     total_req = sum(r.required for r in results)
     total_ear = sum(r.earned for r in results)
     warnings = list(spec["warnings"])
@@ -298,7 +305,7 @@ def check_graduation(department: str, year: Any, courses: str | list[str] | None
     ]
     return CheckResult(
         department=dept, year=y, total_required=total_req, total_earned=round(total_ear, 2),
-        passed=all(r.passed for r in results), by_kind=by_kind,
+        passed=all(r.passed for r in results), by_kind=by_kind, by_category=by_category,
         items=[asdict(r) for r in results], missing=missing,
         unmatched_courses=[c for c in course_list if c not in used],
         warnings=warnings, notes=spec["notes"] + ([spec["unit_rules"]] if spec["unit_rules"] else []),
@@ -313,11 +320,12 @@ def format_result_text(res: CheckResult | dict) -> str:
         f"[{res.department} {res.year}학번] 다면적 졸업인증제 판정",
         f"총점 {res.total_earned:g} / {res.total_required:g}  →  {'✅ 충족' if res.passed else '❌ 미충족'}",
         "구분별: " + ", ".join(f"{k} {v['earned']:g}/{v['required']:g}" for k, v in res.by_kind.items()),
+        "인재상별: " + ", ".join(f"{k} {v['earned']:g}/{v['required']:g}" for k, v in res.by_category.items()),
     ]
     if res.missing:
         lines.append("부족한 항목:")
         for m in res.missing:
-            lines.append(f"  - [{m['kind']}] {m['name']}: {m['need']:g}점 부족 ({m['detail']})")
+            lines.append(f"  - [{m['kind']}/{m['category']}] {m['name']}: {m['need']:g}점 부족 ({m['detail']})")
     if res.unmatched_courses:
         lines.append("졸업인증 항목과 무관한 수강 과목: " + ", ".join(res.unmatched_courses))
     for w in res.warnings:

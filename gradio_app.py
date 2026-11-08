@@ -33,9 +33,11 @@ def _result_markdown(res) -> str:
     lines = [head, f"**총점 {res.total_earned:g} / {res.total_required:g}점**", "",
              "| 구분 | 취득 | 필요 |", "|---|---|---|"]
     lines += [f"| {k} | {v['earned']:g} | {v['required']:g} |" for k, v in res.by_kind.items()]
+    lines += ["", "| 인재상 | 취득 | 필요 |", "|---|---|---|"]
+    lines += [f"| {k} | {v['earned']:g} | {v['required']:g} |" for k, v in res.by_category.items()]
     if res.missing:
-        lines += ["", "### 부족한 항목", "| 구분 | 항목 | 부족 | 현재 상태 |", "|---|---|---|---|"]
-        lines += [f"| {m['kind']} | {m['name']} | {m['need']:g}점 | {m['detail']} |" for m in res.missing]
+        lines += ["", "### 부족한 항목", "| 구분 | 인재상 | 항목 | 부족 | 현재 상태 |", "|---|---|---|---|---|"]
+        lines += [f"| {m['kind']} | {m['category']} | {m['name']} | {m['need']:g}점 | {m['detail']} |" for m in res.missing]
     if res.unmatched_courses:
         lines += ["", "ℹ️ 졸업인증 항목과 매칭되지 않은 과목: " + ", ".join(res.unmatched_courses)]
     lines += [""] + [f"※ {w}" for w in res.warnings + res.notes]

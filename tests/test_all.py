@@ -61,6 +61,17 @@ def test_aibd_2022_partial():
     assert names == {"학과활동": 2, "코딩역량인증제(Lv2 이상)": 5}
 
 
+def test_by_category():
+    r = check_graduation("AI빅데이터", 2022, **FULL_AIBD_2022)
+    bc = {k: v["required"] for k, v in r.by_category.items()}
+    assert bc == {"소통하는 공감인재": 25, "융합하는 창의인재": 45, "공헌하는 글로벌인재": 25}
+    assert all(v["earned"] == v["required"] for v in r.by_category.values())
+    for dept, info in REQ["departments"].items():          # 모든 학과·학번: 인재상 합 == 총점
+        for t in info["tracks"]:
+            r = check_graduation(dept, t["years"][0], "", {})
+            assert sum(v["required"] for v in r.by_category.values()) == t["total"]
+
+
 def test_partial_scores():
     """자기주도상담 회당 1점, 졸업필수활동 부분 점수, ASP 두 학기 모두 필요"""
     r = check_graduation("AI빅데이터", 2022, "", {"c_selfcounsel": 3, "c_gradact": 10, "c_asp": ["1학기"]})
