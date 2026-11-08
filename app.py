@@ -192,6 +192,14 @@ with tab_check:
             m1.metric("총점", f"{res.total_earned:g} / {res.total_required:g}")
             m2.metric("판정", "충족 ✅" if res.passed else "미충족 ❌")
             m3.metric("부족 항목", f"{len(res.missing)}개")
+            st.markdown("**다면적 졸업인증 이수현황** (학교 시스템 이수현황표와 같은 형식)")
+            cols = [(g, c) for g in res.matrix for c in res.matrix[g]]
+            hdr = [f"{g}·{c}" for g, c in cols] + ["졸업점수"]
+            need = [res.matrix[g][c]["required"] for g, c in cols] + [res.total_required]
+            got = [res.matrix[g][c]["earned"] for g, c in cols] + [res.total_earned]
+            st.dataframe({"구분": ["필요점수 ⓐ", "이수점수 ⓑ", "미이수점수 ⓐ-ⓑ"],
+                          **{h: [n, e, max(n - e, 0)] for h, n, e in zip(hdr, need, got)}},
+                         use_container_width=True, hide_index=True)
             col_k, col_c = st.columns(2)
             with col_k:
                 st.markdown("**구분별**")

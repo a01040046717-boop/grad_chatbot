@@ -30,6 +30,9 @@ SECTIONS = [("대학공통", "교과"), ("대학공통", "비교과"),
 DEPT_KINDS = ["교과", "졸업필수활동", "비교과지정", "비교과미지정"]
 
 
+CAT_SHORT = {"소통하는 공감인재": "공감", "융합하는 창의인재": "창의", "공헌하는 글로벌인재": "글로벌"}
+
+
 def section_label(group: str, kind: str) -> str:
     return f"{group}·{kind}"
 CATEGORIES = ["소통하는 공감인재", "융합하는 창의인재", "공헌하는 글로벌인재"]
@@ -193,6 +196,7 @@ class CheckResult:
     by_group: dict = field(default_factory=dict)     # {"대학공통": {...}, "학과기준": {...}}
     by_kind: dict = field(default_factory=dict)      # {"대학공통·교과": {...}, ...}
     by_category: dict = field(default_factory=dict)
+    matrix: dict = field(default_factory=dict)       # 이수현황표: {"대학공통": {"공감": {...}, ...}, "학과기준": {...}}
     items: list = field(default_factory=list)
     missing: list = field(default_factory=list)
     unmatched_courses: list = field(default_factory=list)
@@ -323,6 +327,11 @@ def check_graduation(department: str, year: Any, courses: str | list[str] | None
         by_category[c] = {"required": sum(r.required for r in results if r.category == c),
                           "earned": round(sum(r.earned for r in results if r.category == c), 2)}
 
+    # 학교 시스템 '다면적졸업인증 이수현황' 표와 같은 구분(대학공통/학과기준) × 인재상(공감/창의/글로벌)
+    matrix = {g: {CAT_SHORT[c]: {"required": sum(r.required for r in results if r.group == g and r.category == c),
+                                 "earned": round(sum(r.earned for r in results if r.group == g and r.category == c), 2)}
+                  for c in CATEGORIES} for g in GROUPS}
+
     total_req = sum(r.required for r in results)
     total_ear = sum(r.earned for r in results)
     warnings = list(spec["warnings"])
@@ -336,7 +345,7 @@ def check_graduation(department: str, year: Any, courses: str | list[str] | None
     ]
     return CheckResult(
         department=dept, year=y, total_required=total_req, total_earned=round(total_ear, 2),
-        passed=all(r.passed for r in results), by_group=by_group, by_kind=by_kind, by_category=by_category,
+        passed=all(r.passed for r in results), by_group=by_group, by_kind=by_kind, by_category=by_category, matrix=matrix,
         items=[asdict(r) for r in results], missing=missing,
         unmatched_courses=[c for c in course_list if c not in used],
         warnings=warnings, notes=spec["notes"] + ([spec["unit_rules"]] if spec["unit_rules"] else []),
@@ -356,6 +365,9 @@ def format_result_text(res: CheckResult | dict) -> str:
                         for sec, v in res.by_kind.items() if sec.startswith(g)) + ")"
             for g, gv in res.by_group.items()),
         "인재상별: " + ", ".join(f"{k} {v['earned']:g}/{v['required']:g}" for k, v in res.by_category.items()),
+        "이수현황표(이수/필요): " + " / ".join(
+            f"{g} " + ", ".join(f"{c} {v['earned']:g}/{v['required']:g}" for c, v in res.matrix[g].items())
+            for g in res.matrix),
     ]
     if res.missing:
         lines.append("부족한 항목:")

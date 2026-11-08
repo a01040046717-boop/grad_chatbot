@@ -77,8 +77,13 @@ def _item_line(it: dict) -> str:
 def _category_line(dept: str, year: int, req: dict) -> str:
     from .checker import get_requirement_items, CATEGORIES
     items = get_requirement_items(dept, year, req)["items"]
-    return "인재상별 배점(대학공통 포함): " + ", ".join(
+    line = "인재상별 배점(대학공통 포함): " + ", ".join(
         f"{c} {sum(i['points'] for i in items if i['category'] == c):g}점" for c in CATEGORIES)
+    short = {"소통하는 공감인재": "공감", "융합하는 창의인재": "창의", "공헌하는 글로벌인재": "글로벌"}
+    table = " / ".join(
+        f"{g} " + " · ".join(f"{short[c]} {sum(i['points'] for i in items if i['group'] == g and i['category'] == c):g}"
+                             for c in CATEGORIES) for g in ("대학공통", "학과기준"))
+    return line + "\n이수현황표 필요점수(구분×인재상): " + table
 
 
 def structured_chunks() -> list[Chunk]:

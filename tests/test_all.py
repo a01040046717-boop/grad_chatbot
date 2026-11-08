@@ -85,6 +85,14 @@ def test_two_level_sections():
     assert r.by_group["대학공통"]["required"] == 45
 
 
+def test_status_matrix_matches_school_system():
+    """학교 시스템 '다면적졸업인증 이수현황' 필요점수 (AI·빅데이터 22학번 스크린샷 기준)"""
+    r = check_graduation("AI빅데이터", 2022, "", {})
+    need = {g: {c: v["required"] for c, v in row.items()} for g, row in r.matrix.items()}
+    assert need == {"대학공통": {"공감": 15, "창의": 5, "글로벌": 10},
+                    "학과기준": {"공감": 5, "창의": 40, "글로벌": 20}}
+
+
 def test_partial_scores():
     """자기주도상담 회당 1점, 졸업필수활동 부분 점수, ASP 두 학기 모두 필요"""
     r = check_graduation("AI빅데이터", 2022, "", {"c_selfcounsel": 3, "c_gradact": 10, "c_asp": ["1학기"]})

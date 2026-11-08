@@ -30,7 +30,15 @@ def _result_markdown(res) -> str:
     if isinstance(res, dict):
         return "⚠️ " + res["error"]
     head = "## ✅ 졸업인증 충족" if res.passed else "## ❌ 아직 미충족"
-    lines = [head, f"**총점 {res.total_earned:g} / {res.total_required:g}점**", "",
+    cols = [(g, c) for g in res.matrix for c in res.matrix[g]]
+    mx = ["### 다면적 졸업인증 이수현황",
+          "| 구분 | " + " | ".join(f"{g}<br>{c}" for g, c in cols) + " | 졸업점수 |",
+          "|---|" + "---|" * (len(cols) + 1)]
+    for lab, f in [("필요점수 ⓐ", lambda v: v["required"]), ("이수점수 ⓑ", lambda v: v["earned"]),
+                   ("미이수점수 ⓐ-ⓑ", lambda v: max(v["required"] - v["earned"], 0))]:
+        tot = {"required": res.total_required, "earned": res.total_earned}
+        mx.append(f"| {lab} | " + " | ".join(f"{f(res.matrix[g][c]):g}" for g, c in cols) + f" | {f(tot):g} |")
+    lines = [head, f"**총점 {res.total_earned:g} / {res.total_required:g}점**", "", *mx, "",
              "| 구분 | 취득 | 필요 |", "|---|---|---|"]
     for g, gv in res.by_group.items():
         lines.append(f"| **{g}** | **{gv['earned']:g}** | **{gv['required']:g}** |")

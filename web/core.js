@@ -154,10 +154,15 @@ function checkGraduation(department, year, courses, activities, REQ) {
   for (const c of CATEGORIES) byCategory[c] = {
     required: items.filter((r) => r.category === c).reduce((a, r) => a + r.required, 0),
     earned: Math.round(items.filter((r) => r.category === c).reduce((a, r) => a + r.earned, 0) * 100) / 100 };
+  // 학교 시스템 '다면적졸업인증 이수현황' 표: 구분(대학공통/학과기준) × 인재상(공감/창의/글로벌)
+  const SHORT = { "소통하는 공감인재": "공감", "융합하는 창의인재": "창의", "공헌하는 글로벌인재": "글로벌" };
+  const matrix = Object.fromEntries(GROUPS.map((g) => [g, Object.fromEntries(CATEGORIES.map((c) => {
+    const rs = items.filter((r) => r.group === g && r.category === c);
+    return [SHORT[c], { required: sum(rs, "required"), earned: sum(rs, "earned") }]; }))]));
   const totalReq = items.reduce((a, r) => a + r.required, 0);
   const totalEarned = Math.round(items.reduce((a, r) => a + r.earned, 0) * 100) / 100;
   return { department: dept, year: y, totalRequired: totalReq, totalEarned, passed: items.every((r) => r.passed),
-    byGroup, byKind, byCategory, items,
+    byGroup, byKind, byCategory, matrix, items,
     missing: items.filter((r) => !r.passed).map((r) => ({ name: r.name, kind: r.kind, group: r.group, section: r.section, category: r.category,
       need: Math.round((r.required - r.earned) * 100) / 100, detail: r.detail })),
     unmatchedCourses: list.filter((c) => !used.has(c)), warnings: spec.warnings,
@@ -170,7 +175,8 @@ function formatResultText(r) {
     `총점 ${r.totalEarned} / ${r.totalRequired}  →  ${r.passed ? "✅ 충족" : "❌ 미충족"}`,
     "구분별: " + GROUPS.map((g) => `${g} ${r.byGroup[g].earned}/${r.byGroup[g].required} (` +
       Object.entries(r.byKind).filter(([k]) => k.startsWith(g)).map(([k, v]) => `${k.split("·")[1]} ${v.earned}/${v.required}`).join(", ") + ")").join(" / "),
-    "인재상별: " + CATEGORIES.map((c) => `${c} ${r.byCategory[c].earned}/${r.byCategory[c].required}`).join(", ")];
+    "인재상별: " + CATEGORIES.map((c) => `${c} ${r.byCategory[c].earned}/${r.byCategory[c].required}`).join(", "),
+    "이수현황표(이수/필요): " + GROUPS.map((g) => `${g} ` + Object.entries(r.matrix[g]).map(([c, v]) => `${c} ${v.earned}/${v.required}`).join(", ")).join(" / ")];
   if (r.missing.length) { L.push("부족한 항목:"); r.missing.forEach((m) => L.push(`  - [${m.section}/${m.category}] ${m.name}: ${m.need}점 부족 (${m.detail})`)); }
   if (r.unmatchedCourses.length) L.push("졸업인증 항목과 무관한 수강 과목: " + r.unmatchedCourses.join(", "));
   r.warnings.forEach((w) => L.push("※ " + w));

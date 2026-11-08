@@ -112,6 +112,15 @@ aside.sticky { position: sticky; top: 12px; }
 .kinds div { background: var(--bg); border-radius: 8px; padding: 6px 8px; font-size: 12px; color: var(--muted); }
 .kinds strong { display: block; color: var(--ink); font-size: 16px; font-variant-numeric: tabular-nums; }
 .kinds.cats { grid-template-columns: repeat(3, 1fr); margin-top: 0; }
+.mx-wrap { overflow-x: auto; margin: 12px 0 4px; }
+.mx { border-collapse: collapse; width: 100%; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.mx th, .mx td { border: 1px solid var(--line); padding: 5px 3px; text-align: center; white-space: nowrap; }
+.mx { font-size: 12px; }
+.mx thead th { background: var(--bg); color: var(--muted); font-weight: 600; }
+.mx tbody th { text-align: left; font-weight: 600; white-space: nowrap; background: var(--bg); }
+.mx td.tot, .mx th.tot { font-weight: 700; color: var(--stamp); }
+.mx tr.miss th { color: var(--bad); }
+.mx td.neg { color: var(--bad); font-weight: 700; }
 .grp { display: flex; justify-content: space-between; align-items: baseline; margin-top: 12px; font-size: 13px; font-weight: 700; }
 .grp b { font-variant-numeric: tabular-nums; }
 .kinds.k2 { grid-template-columns: repeat(2, 1fr); margin-top: 6px; }
@@ -256,7 +265,7 @@ const state = {
   dept: store.get("grad.dept", "AI·빅데이터학과"),
   year: store.get("grad.year", 2022),
   history: [],          // [{role, content}]
-  acts: {}, touched: false, lastCheck: null, view: "kind",
+  acts: {}, touched: false, lastCheck: null, view: "table",
   busy: false,
 };
 if (!DEPTS.includes(state.dept)) state.dept = "AI·빅데이터학과";
@@ -305,13 +314,27 @@ function renderReqPanel() {
       <div class="total"><b>${s.total}</b><span class="muted">점 필요</span></div>
       ${GROUPS.map((g) => `<div class="grp"><span>${g}</span><b>${fmt(s.groups[g])}점</b></div>
       <div class="kinds k${Object.keys(s.sections).filter((k) => k.startsWith(g)).length}">${Object.entries(s.sections).filter(([k]) => k.startsWith(g)).map(([k, v]) => `<div>${k.split("·")[1]}<strong>${fmt(v)}</strong></div>`).join("")}</div>`).join("")}
-      <div class="grp"><span>인재상별</span><b></b></div>
-      <div class="kinds cats">${CATEGORIES.map((c) => `<div>${CAT_SHORT[c]}<strong>${fmt(s.items.filter((i) => i.category === c).reduce((a, i) => a + i.points, 0))}</strong></div>`).join("")}</div>
+      <div class="grp"><span>이수현황표 필요점수</span><b></b></div>
+      ${matrixTable(checkGraduation(s.department, s.year, "", {}, REQ), true)}
       ${groups}
       ${s.unitRules ? `<p class="note">점수 산정: ${esc(s.unitRules)}</p>` : ""}
       ${s.notes.map((n) => `<p class="note">※ ${esc(n)}</p>`).join("")}
       ${s.warnings.map((n) => `<p class="note">⚠ ${esc(n)}</p>`).join("")}
     </div>`;
+}
+
+/* ---------------- 이수현황표 (학교 시스템과 같은 형식) ---------------- */
+function matrixTable(r, needOnly = false) {
+  const cols = GROUPS.flatMap((g) => Object.keys(r.matrix[g]).map((c) => [g, c]));
+  const tot = { required: r.totalRequired ?? r.total, earned: r.totalEarned ?? 0 };
+  const rows = needOnly ? [["필요점수", (v) => v.required, ""]]
+    : [["필요점수 ⓐ", (v) => v.required, ""], ["이수점수 ⓑ", (v) => v.earned, ""], ["미이수 ⓐ-ⓑ", (v) => Math.max(v.required - v.earned, 0), "miss"]];
+  return `<div class="mx-wrap"><table class="mx">
+    <thead><tr><th rowspan="2">구분</th>${GROUPS.map((g) => `<th colspan="3">${g}</th>`).join("")}<th rowspan="2" class="tot">졸업점수</th></tr>
+    <tr>${cols.map(([, c]) => `<th>${c}</th>`).join("")}</tr></thead>
+    <tbody>${rows.map(([lab, f, cls]) => `<tr class="${cls}"><th>${lab}</th>${cols.map(([g, c]) => { const x = f(r.matrix[g][c]);
+      return `<td class="${cls && x > 0 ? "neg" : ""}">${fmt(x)}</td>`; }).join("")}<td class="tot ${cls && f(tot) > 0 ? "neg" : ""}">${fmt(f(tot))}</td></tr>`).join("")}</tbody>
+  </table></div>`;
 }
 
 /* ---------------- 자가진단 폼 ---------------- */
@@ -399,13 +422,14 @@ function recompute() {
       <div class="verdict"><div class="total"><b>${fmt(r.totalEarned)}</b><span class="muted">/ ${fmt(r.totalRequired)}점</span></div>
         <span class="stamp ${r.passed ? "pass" : "fail"}">${r.passed ? "졸업인증 충족" : "미충족"}</span></div>
       <div class="seg" role="tablist" aria-label="점수 보기 기준">
-        <button type="button" class="${state.view === "cat" ? "" : "on"}" data-view="kind">구분별</button>
+        <button type="button" class="${state.view === "table" ? "on" : ""}" data-view="table">이수현황표</button>
+        <button type="button" class="${state.view === "kind" ? "on" : ""}" data-view="kind">구분별</button>
         <button type="button" class="${state.view === "cat" ? "on" : ""}" data-view="cat">인재상별</button>
       </div>
-      <div class="bars">${(state.view === "cat" ? CATEGORIES.map((c) => [CAT_SHORT[c], r.byCategory[c], ""])
+      ${state.view === "table" ? matrixTable(r) : `<div class="bars">${(state.view === "cat" ? CATEGORIES.map((c) => [CAT_SHORT[c], r.byCategory[c], ""])
         : GROUPS.flatMap((g) => [[g, r.byGroup[g], "top"], ...Object.entries(r.byKind).filter(([k]) => k.startsWith(g)).map(([k, v]) => ["└ " + k.split("·")[1], v, "sub"])])).map(([k, v, cls]) => {
         const p = v.required ? Math.min(100, (v.earned / v.required) * 100) : 100;
-        return `<div class="bar ${cls} ${p >= 100 ? "full" : ""}"><div class="lab"><span>${k}</span><span>${fmt(v.earned)} / ${fmt(v.required)}</span></div><div class="track"><div class="fill" style="width:${p}%"></div></div></div>`; }).join("")}</div>
+        return `<div class="bar ${cls} ${p >= 100 ? "full" : ""}"><div class="lab"><span>${k}</span><span>${fmt(v.earned)} / ${fmt(v.required)}</span></div><div class="track"><div class="fill" style="width:${p}%"></div></div></div>`; }).join("")}</div>`}
       ${r.missing.length ? `<h3 class="small" style="margin:0 0 6px">부족한 항목 ${r.missing.length}개</h3><ul class="missing">${r.missing.map((m) =>
         `<li>${esc(m.name)} <b>−${fmt(m.need)}점</b><span class="d">${esc(m.section)} · ${esc(CAT_SHORT[m.category])} · ${esc(m.detail)}</span></li>`).join("")}</ul>` : `<p>모든 항목을 채웠습니다. 비교과일람표에서 공식 이수내역을 확인하세요.</p>`}
       ${r.unmatchedCourses.length ? `<p class="note">졸업인증 항목과 관계없는 과목: ${r.unmatchedCourses.map(esc).join(", ")}</p>` : ""}
