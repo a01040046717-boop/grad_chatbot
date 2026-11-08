@@ -168,7 +168,7 @@ def read_document(path: Path) -> list[tuple[str, str]]:
 def document_chunks(docs_dir: Path = DOCS_DIR) -> list[Chunk]:
     out = []
     for path in sorted(docs_dir.glob("**/*")):
-        if path.suffix.lower() not in SUPPORTED or path.name.startswith("."):
+        if path.suffix.lower() not in SUPPORTED or path.name.startswith((".", "_")):  # _README 등 안내 파일 제외
             continue
         for loc, text in read_document(path):
             for j, piece in enumerate(_split(text)):
