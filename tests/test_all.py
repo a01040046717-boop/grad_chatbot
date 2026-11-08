@@ -280,6 +280,30 @@ def test_local_streaming_and_key_points():
     assert pts[0][0].startswith("합계 95점")
 
 
+def test_colab_ui_bridge():
+    """Colab 화면: 한 장짜리 HTML 생성 + 백그라운드 AI 답변 작업(start → poll) 흐름"""
+    import time
+    from rag import colab_ui
+    from rag.local_llm import LocalLLMClient
+    page = colab_ui.build_page()
+    assert "/*REQ*/" not in page and "/*CORE*/" not in page and "askColab" in page and "invokeFunction" in page
+
+    class FakeStream(LocalLLMClient):
+        def __init__(self):
+            self.is_local, self.model_name = True, "fake"
+        def stream(self, messages, tools=None, max_new_tokens=None):
+            for w in ["학과활동은 ", "5회 ", "참여해요.", "<|im_end|>"]:
+                time.sleep(0.01); yield w
+    r = build_index(verbose=False)
+    jid = colab_ui.start_job(FakeStream(), r, "학과활동은 몇 번?", "AI·빅데이터학과", 2022, [], "")
+    for _ in range(200):
+        s = colab_ui.poll_job(jid)
+        if s["done"]:
+            break
+        time.sleep(0.02)
+    assert s["done"] and not s["error"] and s["text"] == "학과활동은 5회 참여해요."
+
+
 def test_offline_chat_judgement():
     """LLM 없이도 채팅 문장으로 졸업 판정 결과를 답한다"""
     r = build_index(verbose=False)

@@ -95,6 +95,18 @@ aside.sticky { position: sticky; top: 12px; }
 .meta details summary { cursor: pointer; }
 .meta li { margin: 2px 0; }
 .thinking { color: var(--muted); font-style: italic; }
+/* Colab 모드: AI 답변(스트리밍) + 안내문에서 바로 찾은 내용 */
+.ai-part { border-left: 3px solid var(--accent); padding-left: 10px; margin-bottom: 10px; }
+.part-h { font-size: 12px; font-weight: 700; color: var(--accent); margin-bottom: 4px; display: flex; gap: 6px; align-items: center; }
+.part-h .muted { font-weight: 400; }
+.doc-part { border-left: 3px solid var(--line); padding-left: 10px; }
+.doc-part .part-h { color: var(--muted); }
+.spinner { width: 12px; height: 12px; border: 2px solid var(--accent-soft); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.caret::after { content: "▌"; color: var(--accent); animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.colab .msgs { max-height: 520px; }
+.colab .chat { min-height: 0; }
 .composer { border-top: 1px solid var(--line); padding: 12px; display: grid; gap: 10px; }
 .examples { display: flex; flex-wrap: wrap; gap: 6px; }
 .examples button { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 5px 11px; font-size: 13px; cursor: pointer; color: var(--muted); }
@@ -857,11 +869,30 @@ function getSample() {
     ? window.claude.use("sample").catch(() => null) : Promise.resolve(null);
   return samplePromise;
 }
+/* Colab 모드: 노트북 커널(파이썬)의 무료 오픈소스 LLM 에 연결 (google.colab.kernel.invokeFunction) */
+function colabKernel() {
+  for (const w of [window, window.parent]) {
+    try { if (w && w.google && w.google.colab && w.google.colab.kernel) return w.google.colab.kernel; } catch (e) {}
+  }
+  return null;
+}
+const KERNEL = colabKernel();
+let COLAB_MODEL = null;
+async function colabCall(name, args) {
+  const r = await KERNEL.invokeFunction(name, args, {});
+  return r && r.data ? r.data["application/json"] : null;
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let aiOff = false;
 function setMode(on) {
   const m = $("#mode");
   m.className = "chip " + (on ? "on" : "off");
   m.innerHTML = `<span class="dot"></span>${on ? "AI 답변 사용 가능" : "검색 모드"}`;
+  if (KERNEL) {
+    m.innerHTML = `<span class="dot"></span>${on ? "AI 연결됨 · " + esc(COLAB_MODEL || "") : "검색 모드 (AI 꺼짐)"}`;
+    m.title = on ? "Colab에서 실행 중인 무료 오픈소스 LLM이 답합니다 (API 키 불필요)" : "노트북에서 오프라인 모드를 골랐어요. 검색과 자가진단은 모두 쓸 수 있습니다.";
+    return;
+  }
   m.title = on ? "질문하면 Claude가 문서 근거로 답합니다" : "이 화면에서는 AI 답변 대신 안내문 검색으로 답합니다. 검색과 자가진단은 모두 쓸 수 있습니다.";
 }
 
@@ -924,7 +955,24 @@ function autoJudgeMarkdown(auto) {
   return L.join("\n");
 }
 
-function offlineAnswer(q, hits, auto) {
+/* 전체 기준 질문 → 선택한 학과·학번의 구분별 항목 목록 */
+function overviewMarkdown(q) {
+  const [qd, qy] = detectProfile(q, REQ);
+  const dept = qd || state.dept, year = qy || state.year;
+  const s = getRequirementItems(dept, year, REQ);
+  if (s.error) return s.error;
+  const L = [`**${s.department} ${year}학번: 총 ${fmt(s.total)}점 필요**`, ""];
+  for (const sec of Object.keys(s.sections)) {
+    const its = s.items.filter((i) => i.section === sec);
+    L.push(`- **${sec}** ${fmt(s.sections[sec])}점: ` + its.map((i) => `${i.name} ${fmt(i.points)}${i.type === "count" ? `(회당 ${fmt(i.per)}점)` : ""}`).join(", "));
+  }
+  const cats = {};
+  for (const i of s.items) cats[i.category] = (cats[i.category] || 0) + i.points;
+  L.push("", "인재상별: " + Object.entries(cats).map(([c, v]) => `${c} ${fmt(v)}점`).join(" · "));
+  return L.join("\n");
+}
+
+function offlineAnswer(q, hits, auto, footer = true) {
   const parts = [];
   const wantsCheck = /졸업\s*가능|충족|부족|남은|모자|채우/.test(q);
   if (auto) { parts.push(autoJudgeMarkdown(auto)); return parts.join("\n\n"); }
@@ -932,6 +980,8 @@ function offlineAnswer(q, hits, auto) {
     parts.push(`**자가진단 결과**\n\`\`\`\n${formatResultText(state.lastCheck)}\n\`\`\``);
   else if (wantsCheck) parts.push("졸업 가능 여부는 **졸업 자가진단** 탭에서 과목과 활동을 입력하면 바로 계산돼요.");
   const wantsAll = /전체|기준|요건|알려/.test(q) && !/몇|어디|뭐|무엇/.test(q);
+  const ov = /전체|총점|모든 항목|졸업\s*요건|인증\s*기준/.test(q) && !/몇\s*번|어디/.test(q) ? overviewMarkdown(q) : null;
+  if (ov) { parts.push(ov); if (footer) parts.push("_검색 모드: 졸업인증 기준표에서 찾아 보여드렸어요._"); return parts.join("\n\n"); }
   const lines = keyLines(q, hits, wantsAll ? 0 : 5);
   // 공식안내 문서(.md) 섹션이 상위에 걸리면 그 섹션 전체(표 포함)를 보여준다
   const isMd = (loc) => hits.some((h) => h.chunk.location === loc && h.chunk.source.endsWith(".md"));
@@ -950,7 +1000,7 @@ function offlineAnswer(q, hits, auto) {
     const top = hits.find((h) => !h.chunk.location.startsWith("p.")) || hits[0];
     if (top) parts.push(`**[문서 1] ${top.chunk.location}**\n\`\`\`\n${top.chunk.text.slice(0, 1200)}\n\`\`\``);
   }
-  parts.push("_검색 모드: 안내문에서 질문과 가장 가까운 내용을 찾아 보여드렸어요._");
+  if (footer) parts.push("_검색 모드: 안내문에서 질문과 가장 가까운 내용을 찾아 보여드렸어요._");
   return parts.join("\n\n");
 }
 
@@ -968,6 +1018,7 @@ async function ask(q) {
     if (e.recognized.length) { const r = checkGraduation(jd, jy, e.courses, e.activities, REQ); if (!r.error) auto = { rec: e.recognized, res: r }; }
   }
   const bubble = addMsg("bot", `<span class="thinking">문서를 찾는 중…</span>`);
+  if (KERNEL && COLAB_MODEL && !aiOff) { await askColab(q, hits, auto, bubble); return; }
   const sample = aiOff ? null : await getSample();
   let text = "", sources = [...hits], trace = [];
   if (!sample) {
@@ -995,6 +1046,40 @@ async function ask(q) {
   state.busy = false; $("#send").disabled = false; $("#msgs").scrollTop = $("#msgs").scrollHeight;
 }
 
+/* Colab: 안내문에서 찾은 내용은 즉시 보여주고, AI 답변은 생성되는 대로 위에 채운다 */
+async function askColab(q, hits, auto, bubble) {
+  const docHtml = `<div class="doc-part"><div class="part-h">📄 안내문에서 바로 찾은 내용</div>${md(offlineAnswer(q, hits, auto, false))}</div>`;
+  const aiHead = (busy) => `<div class="part-h">🤖 AI 답변 <span class="muted">${esc(COLAB_MODEL)}</span>${busy ? ' <span class="spinner"></span>' : ""}</div>`;
+  const render = (aiHtml, busy) => { bubble.innerHTML = `<div class="ai-part">${aiHead(busy)}${aiHtml}</div>${docHtml}`; };
+  render(`<span class="thinking">답변을 만드는 중이에요…</span>`, true);
+  $("#msgs").scrollTop = $("#msgs").scrollHeight;
+  const checkText = state.touched && state.lastCheck && !state.lastCheck.error ? formatResultText(state.lastCheck) : "";
+  let text = "", tools = [];
+  try {
+    const st = await colabCall("grad.start", [q, state.dept, state.year, state.history.slice(-4), checkText]);
+    let last = null;
+    for (let i = 0; i < 2400; i++) {               // 최대 약 10분
+      await sleep(i < 10 ? 150 : 300);
+      const s = await colabCall("grad.poll", [st.job]);
+      if (!s) throw new Error("응답 없음");
+      if (s.error) throw new Error(s.error);
+      if (s.text !== last) {
+        last = s.text; const at = $("#msgs").scrollHeight - $("#msgs").scrollTop - $("#msgs").clientHeight < 40;
+        const busyMsg = /^⏳/.test(s.text || "");
+        render(busyMsg ? `<span class="thinking">${esc(s.text.replace(/^⏳\s*/, ""))}</span>` : `<div class="${s.done ? "" : "caret"}">${md(s.text || "")}</div>`, !s.done);
+        if (at) $("#msgs").scrollTop = $("#msgs").scrollHeight;
+      }
+      if (s.done) { text = s.text || ""; tools = s.tools || []; break; }
+    }
+  } catch (e) {
+    text = `⚠️ AI 답변을 받지 못했어요 (${e.message || e}). Colab 런타임이 실행 중인지 확인해 주세요. 아래 안내문 내용은 그대로 확인할 수 있어요.`;
+  }
+  render(md(text), false);
+  bubble.innerHTML += metaHtml(hits.slice(0, 6), tools);
+  state.history.push({ role: "user", content: q }, { role: "assistant", content: text });
+  state.busy = false; $("#send").disabled = false;
+}
+
 $("#ask-form").addEventListener("submit", (e) => { e.preventDefault(); ask($("#q").value); });
 $("#q").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); ask($("#q").value); } });
 const EXAMPLES = ["내 학번 졸업인증 기준 전체 알려줘", "학과활동은 몇 번 참여해야 해?", "권장 자격증은 뭐가 있어?", "비교과 이수내역은 어디서 확인해?", "AI·SW전공역량졸업인증제 200점은 어떻게 채워?",
@@ -1015,7 +1100,10 @@ function welcome() {
 fillProfile(); renderReqPanel(); renderForm();
 $("#courses").value = store.get("grad.courses", "");
 recompute(); route(); welcome();
-getSample().then((s) => setMode(!!s));
+if (KERNEL) {
+  document.documentElement.classList.add("colab");
+  colabCall("grad.info", []).then((i) => { COLAB_MODEL = i && i.model; setMode(!!COLAB_MODEL); }).catch(() => setMode(false));
+} else getSample().then((s) => setMode(!!s));
 </script>
 </body>
 </html>
