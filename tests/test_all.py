@@ -44,7 +44,7 @@ FULL_AIBD_2022 = dict(
     activities={
         "c_asp": ["1학기", "2학기"], "c_selfcounsel": 5, "c_gradact": 15,
         "dept_act": 5, "cert_contest": {"subitems": {"SQL개발자(SQLD) 취득": True}},
-        "coding": True, "aisw": True, "free_creative": 9, "core_lang": True, "free_global": 10,
+        "coding": True, "aisw": True, "free_creative": 4, "core_lang": True, "free_global": 15,
     })
 
 
@@ -64,7 +64,7 @@ def test_aibd_2022_partial():
 def test_by_category():
     r = check_graduation("AI빅데이터", 2022, **FULL_AIBD_2022)
     bc = {k: v["required"] for k, v in r.by_category.items()}
-    assert bc == {"소통하는 공감인재": 20, "융합하는 창의인재": 50, "공헌하는 글로벌인재": 25}  # 비교과일람표 기준
+    assert bc == {"소통하는 공감인재": 20, "융합하는 창의인재": 45, "공헌하는 글로벌인재": 30}  # 비교과일람표 기준
     assert all(v["earned"] == v["required"] for v in r.by_category.values())
     for dept, info in REQ["departments"].items():          # 모든 학과·학번: 인재상 합 == 총점
         for t in info["tracks"]:
@@ -91,7 +91,7 @@ def test_topcit_level_select():
 def test_points_cap_and_count():
     r = check_graduation("AI빅데이터", 2022, "", {"dept_act": 99, "free_global": 30})
     it = {i["id"]: i for i in r.items}
-    assert it["dept_act"]["earned"] == 5 and it["free_global"]["earned"] == 10
+    assert it["dept_act"]["earned"] == 5 and it["free_global"]["earned"] == 15
 
 
 def test_choose_and_substitute():
