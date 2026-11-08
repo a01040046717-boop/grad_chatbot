@@ -1622,15 +1622,6 @@
        "points": 5
       },
       {
-       "id": "free_comm",
-       "name": "비교과자율활동(공감)",
-       "category": "소통하는 공감인재",
-       "kind": "비교과미지정",
-       "type": "points",
-       "points": 5,
-       "subitems": []
-      },
-      {
        "id": "startup",
        "name": "예비창업설계",
        "category": "융합하는 창의인재",
@@ -1712,8 +1703,9 @@
        "category": "융합하는 창의인재",
        "kind": "비교과미지정",
        "type": "points",
-       "points": 4,
-       "subitems": []
+       "points": 9,
+       "subitems": [],
+       "note": "비교과일람표(학생 확인) 기준: 비교과미지정에 공감 항목 없이 창의 9점 (안내문 PDF 표에는 공감 5점·창의 4점으로 표기)"
       },
       {
        "id": "core_lang",
