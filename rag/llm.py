@@ -1,7 +1,8 @@
 """
 LLM 연결 + RAG 답변 생성 + Tool Calling
 
-- OpenAI 호환 API 사용 (OPENAI_BASE_URL 로 Upstage Solar, Ollama, vLLM 등 교체 가능)
+- OpenAI 호환 API 사용 (OPENAI_BASE_URL 로 Gemini, Upstage Solar, Ollama 등 교체 가능)
+- LLM_PROVIDER=local 이면 API 키 없이 무료 오픈소스 모델(Qwen2.5)을 직접 실행 (rag/local_llm.py)
 - 매 질문마다 검색(RAG) 결과를 컨텍스트로 넣고,
   LLM 이 필요하면 도구를 호출한다:
     search_documents   : 추가 검색
@@ -69,6 +70,14 @@ TOOLS = [
 ]
 
 
+def model_label(client) -> str:
+    if client is None:
+        return "오프라인 모드 (LLM 없음)"
+    if getattr(client, "is_local", False):
+        return f"무료 오픈소스 LLM: {client.model_name}"
+    return f"API: {CHAT_MODEL}"
+
+
 @dataclass
 class Answer:
     text: str
@@ -81,6 +90,13 @@ class Answer:
 # 클라이언트 / 임베딩
 # ----------------------------------------------------------------------------
 def get_client():
+    """LLM_PROVIDER: auto(기본, 키 있으면 API·없으면 오프라인) / api / local(무료 오픈소스 모델) / off"""
+    provider = os.getenv("LLM_PROVIDER", "auto").lower()
+    if provider in ("off", "offline", "none"):
+        return None
+    if provider == "local":
+        from .local_llm import LocalLLMClient
+        return LocalLLMClient()
     key = os.getenv("OPENAI_API_KEY")
     if not key:
         return None
@@ -95,8 +111,8 @@ def get_client():
 
 def make_embedder(client):
     """client 가 있으면 임베딩 함수 반환. USE_EMBEDDINGS=0 이면 끔."""
-    if client is None or os.getenv("USE_EMBEDDINGS", "1") == "0":
-        return None
+    if client is None or getattr(client, "is_local", False) or os.getenv("USE_EMBEDDINGS", "1") == "0":
+        return None   # 로컬 모델은 임베딩 없이 TF-IDF 검색 사용
 
     def embed(texts: list[str]) -> list[list[float]]:
         out = []

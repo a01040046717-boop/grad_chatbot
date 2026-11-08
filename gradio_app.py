@@ -9,7 +9,7 @@ import gradio as gr
 
 from rag.checker import load_requirements, get_requirement_items, check_graduation, format_result_text
 from rag.retriever import load_or_build
-from rag.llm import answer, get_client, make_embedder
+from rag.llm import answer, get_client, make_embedder, model_label
 
 REQ = load_requirements()
 DEPTS = list(REQ["departments"])
@@ -55,10 +55,13 @@ def _result_markdown(res) -> str:
     return "\n".join(lines)
 
 
-def build_demo(default_dept: str = "AI·빅데이터학과", default_year: int = 2022):
-    client = get_client()
-    retriever = load_or_build(embedder=make_embedder(client))
-    mode = "LLM 연결됨" if client else "오프라인 모드 (API 키 없음 → 검색 결과만 표시)"
+def build_demo(default_dept: str = "AI·빅데이터학과", default_year: int = 2022, client=None, retriever=None):
+    """client/retriever 를 넘기면 그대로 사용 (노트북에서 모델을 두 번 불러오지 않도록)"""
+    if client is None:
+        client = get_client()
+    if retriever is None:
+        retriever = load_or_build(embedder=make_embedder(client))
+    mode = model_label(client)
     sources = sorted({c.source for c in retriever.chunks})
 
     with gr.Blocks(title="SW융합대학 졸업요건 챗봇") as demo:

@@ -203,6 +203,43 @@ def test_llm_tool_loop():
     assert a.sources
 
 
+def test_local_llm_wrapper():
+    """무료 오픈소스 LLM 래퍼: Qwen 형식 출력(<tool_call>)을 해석해 RAG·도구 호출 루프가 그대로 동작해야 한다"""
+    from rag.local_llm import LocalLLMClient, parse_output
+
+    class T:
+        def __init__(self, d): self.data = d
+        shape = property(lambda self: (1, len(self.data)))
+        def to(self, dev): return self
+        def __getitem__(self, s): return self.data[s]
+    script = [
+        '<tool_call>\n{"name": "check_graduation", "arguments": {"department": "AI빅데이터", "admission_year": 2022, '
+        '"courses": ["인간사랑", "예비창업설계"], "activities": {"dept_act": 3, "c_selfcounsel": 2}}}\n</tool_call><|im_end|>',
+        '아직 미충족이에요. [문서 1]<|im_end|>']
+    class Tok:
+        eos_token_id = 0
+        def apply_chat_template(self, conv, tools=None, add_generation_prompt=True, tokenize=False):
+            for m in conv:   # 도구 호출 인자는 dict 로 변환되어 있어야 함 (Qwen 템플릿이 tojson 으로 렌더)
+                for tc in m.get("tool_calls") or []:
+                    assert isinstance(tc["function"]["arguments"], dict)
+            return json.dumps(conv, ensure_ascii=False)
+        def __call__(self, p, return_tensors=None): return {"input_ids": T(list(p))}
+        def decode(self, ids, skip_special_tokens=False): return "".join(ids)
+    class Model:
+        device, i = "cpu", 0
+        def generate(self, input_ids=None, **kw):
+            out = list(input_ids.data) + list(script[self.i]); self.i += 1; return [out]
+    client = LocalLLMClient("Qwen/Qwen2.5-3B-Instruct", _tokenizer=Tok(), _model=Model())
+    r = build_index(verbose=False)
+    a = llm.answer("인간사랑, 예비창업설계 들었고 학과활동 3번, 자기주도상담 2번 했어. 졸업 가능해?", r, client,
+                   profile={"department": "AI·빅데이터학과", "year": 2022})
+    assert [t[0] for t in a.tool_calls] == ["check_graduation"]
+    assert a.check_result["total_earned"] == 15 and "미충족" in a.text
+    assert llm.make_embedder(client) is None and "오픈소스" in llm.model_label(client)
+    m = parse_output('<tool_call>{"name":"search_documents","arguments":"{\\"query\\": \\"TOPCIT\\"}"}</tool_call>')
+    assert m.tool_calls[0].function.name == "search_documents" and json.loads(m.tool_calls[0].function.arguments) == {"query": "TOPCIT"}
+
+
 def test_offline_mode():
     r = build_index(verbose=False)
     a = llm.answer("학과활동 몇 번?", r, None, profile={"department": "AI·빅데이터학과", "year": 2022})

@@ -28,7 +28,7 @@ from rag.checker import (load_requirements, get_requirement_items, check_graduat
                          format_result_text, parse_course_list, _norm)
 from rag.ingest import DOCS_DIR, SUPPORTED
 from rag.retriever import load_or_build, build_index
-from rag.llm import answer, get_client, make_embedder, CHAT_MODEL
+from rag.llm import answer, get_client, make_embedder, model_label
 
 st.set_page_config(page_title="SW융합대학 졸업요건 챗봇", page_icon="🎓", layout="wide")
 
@@ -67,7 +67,7 @@ with st.sidebar:
     st.divider()
     st.header("⚙️ 상태")
     if client:
-        st.success(f"LLM 연결됨: `{CHAT_MODEL}`")
+        st.success(f"LLM 연결됨 — {model_label(client)}")
     else:
         st.warning("OPENAI_API_KEY 없음 → 오프라인 모드\n(검색 결과만 표시)")
     st.caption(f"검색: {'임베딩 + ' if retriever.dense is not None else ''}TF-IDF 하이브리드 · 청크 {len(retriever.chunks)}개")
