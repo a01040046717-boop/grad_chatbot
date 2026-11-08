@@ -24,7 +24,8 @@ from dataclasses import dataclass, field
 from .checker import (check_graduation, format_result_text, get_requirement_items,
                       resolve_department, parse_year, load_requirements)
 from .retriever import Retriever, format_context, detect_profile
-from .extract import extract_inputs, is_check_request
+from .extract import (extract_inputs, is_check_request, wants_judgement, merge_record, new_record, has_any,
+                      describe_record, credit_line, RESET_RE)
 
 CHAT_MODEL = os.getenv("CHAT_MODEL", "gpt-4o-mini")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "text-embedding-3-small")
@@ -118,18 +119,48 @@ def get_client():
     return OpenAI(api_key=key, base_url=base)
 
 
-def make_embedder(client):
-    """client 가 있으면 임베딩 함수 반환. USE_EMBEDDINGS=0 이면 끔."""
-    if client is None or getattr(client, "is_local", False) or os.getenv("USE_EMBEDDINGS", "1") == "0":
-        return None   # 로컬 모델은 임베딩 없이 TF-IDF 검색 사용
+class LocalEmbedder:
+    """무료 공개 문장 임베딩 모델 (API 키 불필요, 한국어 지원).
+    intfloat/multilingual-e5-small: 문서는 'passage: ', 질문은 'query: ' 를 앞에 붙여 쓰도록 학습된 모델."""
 
-    def embed(texts: list[str]) -> list[list[float]]:
-        out = []
-        for i in range(0, len(texts), 64):
-            resp = client.embeddings.create(model=EMBED_MODEL, input=texts[i:i + 64])
-            out.extend(d.embedding for d in resp.data)
-        return out
-    return embed
+    def __init__(self, name: str | None = None):
+        import torch
+        from sentence_transformers import SentenceTransformer
+        self.name = name or os.getenv("LOCAL_EMBED_MODEL", "intfloat/multilingual-e5-small")
+        self.model = SentenceTransformer(self.name, device="cuda" if torch.cuda.is_available() else "cpu")
+
+    def __call__(self, texts: list[str]) -> list[list[float]]:
+        return self.model.encode(["passage: " + t for t in texts], normalize_embeddings=True,
+                                 batch_size=32, show_progress_bar=False).tolist()
+
+    def query(self, text: str) -> list[float]:
+        return self.model.encode(["query: " + text], normalize_embeddings=True, show_progress_bar=False)[0].tolist()
+
+
+def make_embedder(client=None):
+    """검색용 임베딩 함수. USE_EMBEDDINGS=0 이면 끔(TF-IDF만).
+    - API 클라이언트: OpenAI 호환 임베딩 API
+    - 그 밖(무료 LLM·오프라인): sentence-transformers 가 설치돼 있으면 무료 공개 모델 multilingual-e5-small"""
+    if os.getenv("USE_EMBEDDINGS", "1") == "0":
+        return None
+    if client is not None and not getattr(client, "is_local", False):
+        def embed(texts: list[str]) -> list[list[float]]:
+            out = []
+            for i in range(0, len(texts), 64):
+                resp = client.embeddings.create(model=EMBED_MODEL, input=texts[i:i + 64])
+                out.extend(d.embedding for d in resp.data)
+            return out
+        embed.name = EMBED_MODEL
+        return embed
+    try:
+        import sentence_transformers  # noqa: F401
+    except ImportError:
+        return None
+    try:
+        return LocalEmbedder()
+    except Exception as e:  # 모델을 못 받으면 TF-IDF 만으로 검색
+        print(f"[warn] 임베딩 모델을 불러오지 못해 TF-IDF 검색만 사용합니다: {e}")
+        return None
 
 
 # ----------------------------------------------------------------------------
@@ -328,12 +359,48 @@ def _strip_special(text: str) -> str:
     return re.sub(r"<\|[^>]*$", "", text)       # 생성 중간의 '<|im' 같은 조각도 숨김
 
 
+def chat_judgement(question: str, dept: str | None, year: int | None, record: dict | None = None,
+                   memory: dict | None = None):
+    """채팅 판정. → (판정 설명 텍스트, CheckResult) 또는 (None, None)
+    record: 화면이 이미 누적한 기록 (Colab 화면) / memory: 대화별 누적 기록을 담을 dict (Gradio 등)
+    둘 다 없으면 이번 문장만으로 판정한다."""
+    if not (dept and year):
+        return None, None
+    spec = get_requirement_items(dept, year)
+    if "error" in spec:
+        return None, None
+    if record is not None:
+        rec = record
+    else:
+        ext = extract_inputs(question, dept, year)
+        key = f"{dept}|{year}"
+        base = (memory or {}).get(key) or new_record(dept, year)
+        if not wants_judgement(question, ext, base, spec):
+            return None, None
+        rec = merge_record(base, ext, question, spec)
+        if memory is not None:
+            memory[key] = rec
+        if RESET_RE.search(question) and not has_any(rec):
+            return "대화로 말씀하신 이수 기록을 모두 지웠어요. 들은 과목과 활동을 다시 말씀해 주세요.", None
+    if not has_any(rec):
+        return None, None
+    res = check_graduation(dept, year, rec["courses"], rec["activities"])
+    if isinstance(res, dict):
+        return None, None
+    text = "지금까지 말씀하신 내용(대화 누적): " + ", ".join(describe_record(rec, spec)) + "\n" + format_result_text(res)
+    cl = credit_line(rec.get("credits"), load_requirements())
+    if cl:
+        text += "\n" + cl
+    return text, res
+
+
 def answer_stream(question: str, retriever: Retriever, client=None, history: list[dict] | None = None,
-                  profile: dict | None = None, check_text: str | None = None, k: int = 5):
+                  profile: dict | None = None, check_text: str | None = None, k: int = 5,
+                  record: dict | None = None, memory: dict | None = None):
     """화면용 스트리밍 답변. 진행 중에는 문자열(지금까지의 답변)을, 마지막에는 Answer 를 내보낸다.
     무료 오픈소스 LLM 이 아니면 answer() 결과를 한 번에 내보낸다."""
     if client is None or not getattr(client, "is_local", False) or not hasattr(client, "stream"):
-        yield answer(question, retriever, client, history, profile, check_text, k)
+        yield answer(question, retriever, client, history, profile, check_text, k, record=record, memory=memory)
         return
 
     profile = profile or {}
@@ -350,15 +417,11 @@ def answer_stream(question: str, retriever: Retriever, client=None, history: lis
     state = {"department": dept, "year": year, "sources": list(used), "check_result": None}
     trace = []
 
-    is_check = bool(dept and year and is_check_request(question))
-    auto = None
+    auto, res = chat_judgement(question, dept, year, record, memory)
+    is_check = auto is not None
     if is_check:
-        ext = extract_inputs(question, dept, year)
-        res = check_graduation(dept, year, ext["courses"], ext["activities"])
-        if not isinstance(res, dict):
-            state["check_result"] = res.to_dict()
-            auto = ("문장에서 인식한 입력: " + (", ".join(ext["recognized"]) or "없음") + "\n" + format_result_text(res))
-            trace.append(("문장 자동 인식", {}, auto[:600]))
+        state["check_result"] = res.to_dict() if res else None
+        trace.append(("문장 자동 인식", {}, auto[:600]))
 
     system = LOCAL_SYSTEM
     if dept and year:
@@ -415,10 +478,10 @@ def parse_local(text: str, tools):
 
 def answer(question: str, retriever: Retriever, client=None, history: list[dict] | None = None,
            profile: dict | None = None, check_text: str | None = None, k: int = 5,
-           max_tool_rounds: int = 5) -> Answer:
+           max_tool_rounds: int = 5, record: dict | None = None, memory: dict | None = None) -> Answer:
     if client is not None and getattr(client, "is_local", False) and hasattr(client, "stream"):
         final = None
-        for ev in answer_stream(question, retriever, client, history, profile, check_text, k):
+        for ev in answer_stream(question, retriever, client, history, profile, check_text, k, record, memory):
             final = ev
         return final
 
@@ -437,13 +500,9 @@ def answer(question: str, retriever: Retriever, client=None, history: list[dict]
         dept, year = d2, y2 or year
     elif y2:
         year = y2
-    if dept and year and is_check_request(question):
-        ext = extract_inputs(question, dept, year)
-        if ext["recognized"]:
-            res = check_graduation(dept, year, ext["courses"], ext["activities"])
-            if not isinstance(res, dict):
-                state["check_result"] = res.to_dict()
-                auto = "문장에서 인식한 입력: " + ", ".join(ext["recognized"]) + "\n" + format_result_text(res)
+    auto, res = chat_judgement(question, dept, year, record, memory)
+    if auto:
+        state["check_result"] = res.to_dict() if res else None
 
     if client is None:
         return _offline_answer(question, retrieved, check_text, auto, state["check_result"])

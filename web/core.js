@@ -273,7 +273,7 @@ function formatContext(hits) {
 /* ---------- 문장 → 판정 입력 자동 인식 (Python rag/extract.py 이식) ---------- */
 const KNUM = { "한": 1, "두": 2, "세": 3, "네": 4, "다섯": 5, "여섯": 6, "일곱": 7, "여덟": 8, "아홉": 9, "열": 10 };
 const NUMP = "(\\d+|다섯|여섯|일곱|여덟|아홉|한|두|세|네|열)";
-const NEGP = /^.{0,6}?(안\s*했|안\s*함|못|아직|없|안\s*땄|안\s*받|불합격|떨어)/;
+const NEGP = /^.{0,6}?(안\s*했|안\s*함|안\s*들|안\s*봤|안\s*해|못|아직|없|안\s*땄|안\s*받|불합격|떨어)/;
 const CHECK_INTENT = /졸업\s*(가능|할\s*수|돼|되)|충족|부족|모자|남은|남았|몇\s*점|판정|채웠|채워|계산/;
 const CHECK_KEYS = [["코딩역량", ["코딩역량"]], ["AI·SW전공역량", ["ai·sw전공역량", "aisw전공역량", "aisw역량", "전공역량졸업인증", "aisw"]],
   ["학술제", ["학술제"]], ["중핵교양", ["중핵교양"]], ["학습윤리-기본", ["학습윤리기본", "학습윤리-기본"]], ["학습윤리-심화", ["학습윤리심화", "학습윤리-심화"]],
@@ -305,7 +305,9 @@ function extractInputs(text, dept, year, REQ) {
   }
   let rest = norm(text);
   for (const n of [...names].sort((a, b) => norm(b).length - norm(a).length)) {
-    const k = norm(n); if (k && rest.includes(k)) { courses.push(n); recog.push(`과목 ${n}`); rest = rest.split(k).join("■"); }
+    const k = norm(n);
+    if (k && rest.includes(k)) { rest = rest.split(k).join("■"); if (negated(text, n)) continue;   // '봉사학습은 안 들었어'
+      courses.push(n); recog.push(`과목 ${n}`); }
   }
   for (const it of spec.items) if (it.type === "choose" && it.pattern) {
     const m = text.match(new RegExp(pat(it.pattern) + "[^0-9]{0,6}" + NUMP + "\\s*(과목|개)"));
@@ -358,12 +360,90 @@ function extractInputs(text, dept, year, REQ) {
       if (Object.keys(subs).length || other) acts[it.id] = { subitems: subs, other };
     }
   }
-  return { courses, activities: acts, recognized: recog };
+  const credits = extractCredits(text);
+  if (credits !== null) recog.push(`총 이수학점 ${credits}학점`);
+  return { courses, activities: acts, recognized: recog, credits };
+}
+
+/* ---------- 총 이수학점 (학칙 제33조: 130학점 이상) ---------- */
+const fmtg = (x) => String(+(+x).toFixed(2));   // 파이썬 :g 와 같은 표기 (115, 2.5)
+const CREDIT_RE = /(?:총|지금까지|현재|이수한|들은|딴|취득한)\s*(\d{2,3})\s*학점(?!\s*(?:이상|필요|들어야|이수해야|채워야|인가|인지|맞))|(\d{2,3})\s*학점\s*(?:들었|이수했|채웠|이야|야(?![가-힣])|있어|땄|받았|취득했|했)/;
+function extractCredits(text) {
+  const m = text.match(CREDIT_RE); if (!m) return null;
+  const n = parseInt(m[1] || m[2], 10); return n > 0 && n <= 200 ? n : null;
+}
+function creditLine(credits, REQ) {
+  if (credits === null || credits === undefined) return null;
+  const total = ((REQ.meta || {}).grad_credits || {}).total || 130, left = total - credits;
+  return `졸업학점(학칙 제33조, ${total}학점 이상): ${fmtg(credits)} / ${total}학점 → ` + (left <= 0 ? "충족" : `${fmtg(left)}학점 부족`) + " (다면적 졸업인증과 별개의 졸업요건)";
+}
+
+/* ---------- 대화 누적: 여러 메시지에 나눠 말한 과목·활동을 하나의 기록으로 (Python rag/extract.py 와 같은 규칙) ---------- */
+const HYPO = /하면|한다면|했다면|으면|라면/;
+const RESET_RE = /처음부터\s*다시|초기화|리셋|다\s*지워|전부\s*지워|새로\s*시작/;
+const MORE_RE = /(\d+|한|두|세|네|다섯)\s*(번|회)\s*더|더\s*(\d+|한|두|세|네|다섯)\s*(번|회)/;
+function negated(text, word) {
+  const low = text.toLowerCase(), re = new RegExp(pat(word), "gi"); let m;
+  while ((m = re.exec(low))) { if (NEGP.test(low.slice(m.index + m[0].length, m.index + m[0].length + 12))) return true; }
+  return false;
+}
+const newRecord = (dept, year) => ({ dept, year, courses: [], activities: {}, credits: null });
+const hasAny = (r) => !!(r && (r.courses.length || Object.keys(r.activities).length || (r.credits !== null && r.credits !== undefined)));
+const coreName = (name) => name.replace(/\s*\(.*$/, "");
+function recordedNegation(text, rec, spec) {
+  const items = Object.fromEntries(spec.items.map((i) => [i.id, i]));
+  return rec.courses.some((c) => negated(text, c)) || Object.keys(rec.activities).some((id) => items[id] && negated(text, coreName(items[id].name)));
+}
+function wantsJudgement(text, ext, rec, spec) {
+  if (RESET_RE.test(text) || isCheckRequest(text) || (ext.credits !== null && ext.credits !== undefined)) return true;
+  if (DONE_SIGNAL.test(text) && ext.recognized.length && !HYPO.test(text)) return true;
+  return !!(rec && spec && recordedNegation(text, rec, spec));
+}
+function mergeRecord(rec, ext, text, spec) {
+  if (RESET_RE.test(text)) rec = newRecord(rec.dept, rec.year);
+  rec = { dept: rec.dept, year: rec.year, courses: [...rec.courses], activities: { ...rec.activities }, credits: rec.credits ?? null };
+  const items = Object.fromEntries(spec.items.map((i) => [i.id, i])), more = MORE_RE.test(text);
+  for (const c of ext.courses) if (!rec.courses.includes(c)) rec.courses.push(c);
+  for (const [id, v] of Object.entries(ext.activities)) {
+    const old = rec.activities[id], t = items[id].type;
+    if (t === "count" && more && typeof old === "number") rec.activities[id] = old + v;
+    else if (t === "points" && old && typeof old === "object" && v && typeof v === "object") {
+      const subs = { ...(old.subitems || {}) };
+      for (const [k, x] of Object.entries(v.subitems || {})) {
+        const prev = subs[k], add = more && typeof x === "number" && typeof prev === "number";
+        subs[k] = add ? prev + x : x;
+      }
+      rec.activities[id] = { subitems: subs, other: v.other || old.other || 0 };
+    } else rec.activities[id] = v;
+  }
+  if (ext.credits !== null && ext.credits !== undefined) rec.credits = ext.credits;
+  rec.courses = rec.courses.filter((c) => !negated(text, c));
+  for (const id of Object.keys(rec.activities))
+    if (items[id] && !(id in ext.activities) && negated(text, coreName(items[id].name))) delete rec.activities[id];
+  return rec;
+}
+function describeRecord(rec, spec) {
+  const items = Object.fromEntries(spec.items.map((i) => [i.id, i]));
+  const out = rec.courses.map((c) => `과목 ${c}`);
+  for (const [id, v] of Object.entries(rec.activities)) {
+    const it = items[id]; if (!it) continue;
+    const name = it.name, t = it.type;
+    if (t === "count") out.push(`${name.replace(/\s*\d+회$/, "")} ${fmtg(v)}회`);
+    else if (t === "all_of") out.push(`${name} (${v.join(", ")})`);
+    else if (t === "topcit_rule") out.push(`TOPCIT 응시 ${v.attempts || 0}회, 수준 ${v.level || 0}`);
+    else if (t === "points" && v && typeof v === "object") {
+      for (const [k, x] of Object.entries(v.subitems || {})) out.push(x === true ? k : typeof x === "number" ? `${k} ${fmtg(x)}` : `${k} ${x}`);
+      if (v.other) out.push(`${coreName(name)} ${fmtg(v.other)}점`);
+    } else if (t === "points") out.push(`${name} ${fmtg(v)}점`);
+    else out.push(name);
+  }
+  if (rec.credits !== null && rec.credits !== undefined) out.push(`총 이수학점 ${fmtg(rec.credits)}학점`);
+  return out;
 }
 const HOWTO_INTENT = /어떻게|방법|뭐야|뭔가|무엇|어디서/;
-const DONE_SIGNAL = /졸업\s*(가능|할\s*수|돼|되)|판정|들었|했어|했고|했는데|땄|취득했|이수했|참여했|응시했/;
+const DONE_SIGNAL = /졸업\s*(가능|할\s*수|돼|되)|판정|들었|했어|했고|했는데|했음|땄|취득했|이수했|참여했|응시했|받았|통과|다녀왔|마쳤|끝냈|수료|합격/;
 // '…어떻게 채워?' 같은 방법 질문은 판정 요청이 아님 (들었/했 등 이수 사실을 말하면 판정)
 const isCheckRequest = (t) => CHECK_INTENT.test(t) && !(HOWTO_INTENT.test(t) && !DONE_SIGNAL.test(t));
 
-if (typeof module !== "undefined") module.exports = { extractInputs, isCheckRequest, CATEGORIES, GROUPS, SECTIONS, norm, parseCourseList, resolveDepartment, parseYear, getRequirementItems,
+if (typeof module !== "undefined") module.exports = { extractInputs, isCheckRequest, wantsJudgement, mergeRecord, newRecord, hasAny, describeRecord, creditLine, extractCredits, RESET_RE, CATEGORIES, GROUPS, SECTIONS, norm, parseCourseList, resolveDepartment, parseYear, getRequirementItems,
   checkGraduation, formatResultText, compactRequirements, buildIndex, search, detectProfile, KINDS };

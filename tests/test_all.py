@@ -295,7 +295,10 @@ def test_colab_ui_bridge():
             for w in ["학과활동은 ", "5회 ", "참여해요.", "<|im_end|>"]:
                 time.sleep(0.01); yield w
     r = build_index(verbose=False)
-    jid = colab_ui.start_job(FakeStream(), r, "학과활동은 몇 번?", "AI·빅데이터학과", 2022, [], "")
+    hits = colab_ui.search_hits(r, "학과활동은 몇 번?", "AI·빅데이터학과", 2022)
+    assert hits and all(set(h) == {"id", "score"} for h in hits)
+    jid = colab_ui.start_job(FakeStream(), r, "학과활동은 몇 번?", "AI·빅데이터학과", 2022, [], "",
+                             {"dept": "AI·빅데이터학과", "year": 2022, "courses": ["인간사랑"], "activities": {}, "credits": None})
     for _ in range(200):
         s = colab_ui.poll_job(jid)
         if s["done"]:
@@ -320,6 +323,64 @@ def test_check_intent():
     assert not is_check_request("자가진단 결과에서 부족한 항목을 어떻게 채우면 되는지 알려줘")
     assert is_check_request("인간사랑 들었고 학과활동 3번 했어. 졸업 가능해?")
     assert is_check_request("SQLD 땄는데 어떻게 돼? 졸업 가능해?")
+
+
+def test_cumulative_chat_and_credits():
+    """대화 누적 판정: 여러 메시지에 나눠 말해도 이어서 계산 ('더', '안 했어', '처음부터 다시') + 총 이수학점 130"""
+    from rag.extract import extract_credits
+    r = build_index(verbose=False)
+    mem, prof = {}, {"department": "AI·빅데이터학과", "year": 2022}
+    say = lambda q: llm.answer(q, r, None, profile=prof, memory=mem)
+    a = say("인간사랑 들었고 학과활동 3번 했어. 졸업 가능해?")
+    assert a.check_result["total_earned"] == 8
+    a = say("봉사학습도 들었어")
+    assert a.check_result["total_earned"] == 13
+    a = say("학과활동 2번 더 했어")
+    assert a.check_result["total_earned"] == 15                       # 학과활동 3 + 2 = 5회
+    a = say("총 115학점이야")
+    assert "115 / 130학점" in a.text and "15학점 부족" in a.text
+    a = say("봉사학습은 안 들었어")
+    assert a.check_result["total_earned"] == 10
+    a = say("졸업하려면 총 130학점 들어야 해?")                          # 질문은 기록하지 않음
+    assert a.check_result is None and mem["AI·빅데이터학과|2022"]["credits"] == 115
+    say("처음부터 다시")
+    assert not mem["AI·빅데이터학과|2022"]["courses"] and not mem["AI·빅데이터학과|2022"]["activities"]
+    assert extract_credits("지금까지 98학점 들었어") == 98 and extract_credits("130학점 이상이야?") is None
+
+
+def test_hybrid_embedding_faiss():
+    """임베딩 + FAISS 하이브리드 검색 (실제 모델 대신 같은 인터페이스의 가짜 임베딩·FAISS로 연결 확인)"""
+    import types
+    import numpy as np
+    from rag.ingest import build_chunks
+    from rag.retriever import Retriever
+
+    class FakeIndexFlatIP:                       # faiss.IndexFlatIP 와 같은 사용법
+        def __init__(self, d): self.d, self.x = d, np.zeros((0, d), np.float32)
+        def add(self, v): self.x = np.vstack([self.x, v])
+        def search(self, q, k):
+            s = q @ self.x.T; i = np.argsort(-s, axis=1)[:, :k]
+            return np.take_along_axis(s, i, axis=1), i
+    sys.modules["faiss"] = types.SimpleNamespace(IndexFlatIP=FakeIndexFlatIP)
+
+    class FakeEmbedder:                          # LocalEmbedder 와 같은 사용법 (문서: __call__, 질문: query)
+        name = "fake-e5"
+        def _v(self, t):
+            v = np.zeros(64, np.float32)
+            for i in range(len(t) - 1):
+                v[hash(t[i:i + 2]) % 64] += 1
+            return v / (np.linalg.norm(v) + 1e-9)
+        def __call__(self, texts): return [self._v(t) for t in texts]
+        def query(self, t): return self._v(t)
+    try:
+        r = Retriever(build_chunks(), FakeEmbedder())
+        assert r.faiss_index is not None and "FAISS" in r.search_mode and "fake-e5" in r.search_mode
+        res = r.search("졸업하려면 몇 학점 들어야 해?", k=5, department="AI·빅데이터학과", year=2022)
+        assert any("[1] 총 졸업학점" in c.location for c, _ in res)
+        dense = r.dense_scores("학과활동")
+        assert dense.shape == (len(r.chunks),) and abs(float(dense.max())) <= 1.0001
+    finally:
+        sys.modules.pop("faiss", None)
 
 
 def test_offline_chat_judgement():

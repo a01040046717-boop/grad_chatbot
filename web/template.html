@@ -157,6 +157,13 @@ aside.sticky { position: sticky; top: 12px; }
 .check-grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 20px; align-items: start; }
 @media (max-width: 900px) { .check-grid { grid-template-columns: 1fr; } }
 .course-box textarea { width: 100%; min-height: 150px; resize: vertical; }
+.credit-in { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+.credit-in input { width: 110px; }
+.credit-box { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 0 0 12px; display: grid; gap: 4px; }
+.credit-box .lab { display: flex; justify-content: space-between; align-items: baseline; }
+.credit-box .track { height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; }
+.credit-box .fill { height: 100%; background: var(--warn); }
+.credit-box.ok .fill { background: var(--ok); }
 .parsed { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
 .tag { font-size: 12px; background: var(--accent-soft); color: var(--accent); border-radius: 4px; padding: 1px 6px; }
 .kind-block { border-top: 1px solid var(--line); }
@@ -243,6 +250,8 @@ footer a { color: var(--accent); }
         <label for="courses" class="small muted">한 줄에 한 과목씩 적어 주세요 (쉼표로 구분해도 됩니다).</label>
         <textarea id="courses" placeholder="인간사랑&#10;현대기본영어&#10;봉사학습&#10;예비창업설계"></textarea>
         <div class="parsed" id="parsed"></div>
+        <div class="credit-in"><label for="credits" class="small muted">총 이수학점 <span class="muted">(선택 · 졸업학점 130학점 확인용)</span></label>
+          <input type="number" id="credits" min="0" max="200" step="1" placeholder="예) 115" inputmode="numeric"></div>
       </div>
       <div class="panel-h" style="border-top:1px solid var(--line)"><h2>비교과 활동 · 이수 항목</h2><button class="btn ghost" id="reset" type="button">입력 초기화</button></div>
       <div id="form"></div>
@@ -278,6 +287,8 @@ const state = {
   year: store.get("grad.year", 2022),
   history: [],          // [{role, content}]
   acts: {}, touched: false, lastCheck: null, view: "table",
+  records: {},          // 채팅으로 말한 이수 기록 (학과|학번 별 누적)
+  credits: null,        // 자가진단 탭의 총 이수학점
   busy: false,
 };
 if (!DEPTS.includes(state.dept)) state.dept = "AI·빅데이터학과";
@@ -408,6 +419,15 @@ function collectActs() {
   return acts;
 }
 
+/* 총 이수학점 → 졸업학점(학칙 제33조) 확인. 다면적 졸업인증과 별개의 요건이라 따로 표시 */
+function creditBox() {
+  if (state.credits === null) return "";
+  const total = ((REQ.meta || {}).grad_credits || {}).total || 130, left = total - state.credits, p = Math.min(100, (state.credits / total) * 100);
+  return `<div class="credit-box ${left <= 0 ? "ok" : ""}"><div class="lab"><span>졸업학점 <span class="muted small">학칙 제33조</span></span><b>${fmt(state.credits)} / ${total}학점</b></div>
+    <div class="track"><div class="fill" style="width:${p}%"></div></div>
+    <div class="small muted">${left <= 0 ? "충족" : `${fmt(left)}학점 부족`} · 다면적 졸업인증과 별개의 졸업요건</div></div>`;
+}
+
 function recompute() {
   const courses = $("#courses").value;
   const parsed = parseCourseList(courses);
@@ -438,6 +458,7 @@ function recompute() {
         <button type="button" class="${state.view === "kind" ? "on" : ""}" data-view="kind">구분별</button>
         <button type="button" class="${state.view === "cat" ? "on" : ""}" data-view="cat">인재상별</button>
       </div>
+      ${creditBox()}
       ${state.view === "table" ? matrixTable(r) : `<div class="bars">${(state.view === "cat" ? CATEGORIES.map((c) => [CAT_SHORT[c], r.byCategory[c], ""])
         : GROUPS.flatMap((g) => [[g, r.byGroup[g], "top"], ...Object.entries(r.byKind).filter(([k]) => k.startsWith(g)).map(([k, v]) => ["└ " + k.split("·")[1], v, "sub"])])).map(([k, v, cls]) => {
         const p = v.required ? Math.min(100, (v.earned / v.required) * 100) : 100;
@@ -451,9 +472,11 @@ function recompute() {
   $("#ask-missing").onclick = () => { state.touched = true; location.hash = "#chat"; ask("자가진단 결과에서 부족한 항목을 어떻게 채우면 되는지 우선순위대로 알려줘."); };
 }
 $("#courses").addEventListener("input", () => { state.touched = true; store.set("grad.courses", $("#courses").value); recompute(); });
+$("#credits").addEventListener("input", () => { const v = $("#credits").value.trim(); state.credits = v === "" ? null : Math.max(0, +v);
+  state.touched = true; store.set("grad.credits", v); recompute(); });
 $("#form").addEventListener("input", () => { state.touched = true; recompute(); });
 $("#form").addEventListener("change", () => { state.touched = true; recompute(); });
-$("#reset").addEventListener("click", () => { $("#courses").value = ""; store.set("grad.courses", ""); renderForm(); state.touched = false; recompute(); });
+$("#reset").addEventListener("click", () => { $("#courses").value = ""; store.set("grad.courses", ""); $("#credits").value = ""; state.credits = null; store.set("grad.credits", ""); renderForm(); state.touched = false; recompute(); });
 
 /* ---------------- 마크다운 (간단) ---------------- */
 function inline(s) {
@@ -589,16 +612,18 @@ function bestLineScore(q, c) {
 }
 
 function autoJudgeMarkdown(auto) {
+  if (auto.reset) return "대화로 말씀하신 이수 기록을 모두 지웠어요. 들은 과목과 활동을 다시 말씀해 주세요.";
   const r = auto.res, cols = GROUPS.flatMap((g) => Object.keys(r.matrix[g]).map((c) => [g, c]));
-  const L = [`**말씀하신 내용으로 계산한 졸업인증 판정** (${r.department} ${r.year}학번)`,
-    "인식한 입력: " + auto.rec.join(", "), "",
+  const L = [`**지금까지 말씀하신 내용으로 계산한 졸업인증 판정** (${r.department} ${r.year}학번)`,
+    "반영한 내용(대화 누적): " + auto.rec.join(", "), "",
     `**총점 ${fmt(r.totalEarned)} / ${fmt(r.totalRequired)}점 → ${r.passed ? "충족" : "미충족"}**`, "",
     "| 구분 | " + cols.map(([g, c]) => `${g.slice(0, 2)} ${c}`).join(" | ") + " | 졸업점수 |",
     "|---|" + cols.map(() => "---").join("|") + "|---|",
     "| 필요 | " + cols.map(([g, c]) => fmt(r.matrix[g][c].required)).join(" | ") + ` | ${fmt(r.totalRequired)} |`,
     "| 이수 | " + cols.map(([g, c]) => fmt(r.matrix[g][c].earned)).join(" | ") + ` | ${fmt(r.totalEarned)} |`];
   if (r.missing.length) { L.push("", "**부족한 항목**"); r.missing.slice(0, 8).forEach((m) => L.push(`- ${m.name}: ${fmt(m.need)}점 부족 (${m.detail})`)); if (r.missing.length > 8) L.push(`- 외 ${r.missing.length - 8}개`); }
-  L.push("", "_빠진 항목은 졸업 자가진단 탭에서 직접 입력해 주세요._");
+  if (auto.credit) L.push("", `**${auto.credit.split(" (")[0]}** (다면적 졸업인증과 별개의 졸업요건)`);
+  L.push("", "_이어서 말해도 돼요: “봉사학습도 들었어”, “학과활동 2번 더 했어”, “총 115학점이야”, “처음부터 다시”_");
   return L.join("\n");
 }
 
@@ -659,12 +684,21 @@ async function ask(q) {
   addMsg("user", esc(q).replace(/\n/g, "<br>"));
   const hits = search(INDEX, q, 5, state.dept, state.year, REQ);
   // 졸업 판정 요청이면 문장에서 과목·활동을 규칙으로 인식해 판정 엔진으로 계산
+  // 대화 누적: 이번 문장에서 인식한 과목·활동·이수학점을 지금까지의 기록에 합쳐 판정
   let auto = null;
   const [qd, qy] = detectProfile(q, REQ);
   const jd = qd || state.dept, jy = qy || (qd && qd !== state.dept ? null : state.year);
-  if (jy && isCheckRequest(q)) {
-    const e = extractInputs(q, jd, jy, REQ);
-    if (e.recognized.length) { const r = checkGraduation(jd, jy, e.courses, e.activities, REQ); if (!r.error) auto = { rec: e.recognized, res: r }; }
+  if (jy) {
+    const spec = getRequirementItems(jd, jy, REQ);
+    if (!spec.error) {
+      const key = `${spec.department}|${jy}`, base = state.records[key] || newRecord(spec.department, jy);
+      const e = extractInputs(q, jd, jy, REQ);
+      if (wantsJudgement(q, e, base, spec)) {
+        const rec = mergeRecord(base, e, q, spec); state.records[key] = rec;
+        if (hasAny(rec)) { const r = checkGraduation(jd, jy, rec.courses, rec.activities, REQ); if (!r.error) auto = { rec: describeRecord(rec, spec), res: r, record: rec, credit: creditLine(rec.credits, REQ) }; }
+        else if (RESET_RE.test(q)) auto = { reset: true };
+      }
+    }
   }
   const bubble = addMsg("bot", `<span class="thinking">문서를 찾는 중…</span>`);
   if (KERNEL && COLAB_MODEL && !aiOff) { await askColab(q, hits, auto, bubble); return; }
@@ -676,7 +710,7 @@ async function ask(q) {
   } else {
     const ctx = [`[학생 프로필] 학과: ${state.dept}, 학번: ${state.year}`];
     if (state.touched && state.lastCheck && !state.lastCheck.error) ctx.push(`[학생이 자가진단 탭에서 입력한 최근 판정 결과]\n${formatResultText(state.lastCheck)}`);
-    if (auto) ctx.push(`[학생 문장에서 자동 인식한 입력과 판정 결과 (판정 엔진 계산값)]\n인식한 입력: ${auto.rec.join(", ")}\n${formatResultText(auto.res)}\n→ 이 계산값을 사용해 답하라. 인식되지 않은 항목이 있으면 check_graduation 도구로 다시 계산하라.`);
+    if (auto && auto.res) ctx.push(`[학생 문장에서 자동 인식한 입력과 판정 결과 (판정 엔진 계산값)]\n인식한 입력: ${auto.rec.join(", ")}\n${formatResultText(auto.res)}\n→ 이 계산값을 사용해 답하라. 인식되지 않은 항목이 있으면 check_graduation 도구로 다시 계산하라.`);
     const final = `${PROMPT}\n\n${ctx.join("\n\n")}\n\n[참고 문서]\n${formatContext(hits)}\n\n[질문]\n${q}`;
     const messages = [...state.history.slice(-8), { role: "user", content: final }];
     try {
@@ -697,15 +731,24 @@ async function ask(q) {
 
 /* Colab: 안내문에서 찾은 내용은 즉시 보여주고, AI 답변은 생성되는 대로 위에 채운다 */
 async function askColab(q, hits, auto, bubble) {
+  // 근거 검색은 파이썬 하이브리드 검색(TF-IDF + 임베딩·FAISS)으로 다시 받아 화면과 AI가 같은 근거를 쓰게 한다
+  try {
+    const sr = await colabCall("grad.search", [q, state.dept, state.year]);
+    const byId = Object.fromEntries(INDEX.chunks.map((c) => [c.id, c]));
+    const ph = (sr || []).map((x) => ({ chunk: byId[x.id], score: x.score })).filter((h) => h.chunk);
+    if (ph.length) hits = ph;
+  } catch (e) {}
   const docHtml = `<div class="doc-part"><div class="part-h">📄 안내문에서 바로 찾은 내용</div>${md(offlineAnswer(q, hits, auto, false))}</div>`;
   const aiHead = (busy) => `<div class="part-h">🤖 AI 답변 <span class="muted">${esc(COLAB_MODEL)}</span>${busy ? ' <span class="spinner"></span>' : ""}</div>`;
   const render = (aiHtml, busy) => { bubble.innerHTML = `<div class="ai-part">${aiHead(busy)}${aiHtml}</div>${docHtml}`; };
   render(`<span class="thinking">답변을 만드는 중이에요…</span>`, true);
   $("#msgs").scrollTop = $("#msgs").scrollHeight;
-  const checkText = state.touched && state.lastCheck && !state.lastCheck.error ? formatResultText(state.lastCheck) : "";
+  const checkText = state.touched && state.lastCheck && !state.lastCheck.error
+    ? formatResultText(state.lastCheck) + (state.credits !== null ? "\n" + creditLine(state.credits, REQ) : "") : "";
   let text = "", tools = [];
   try {
-    const st = await colabCall("grad.start", [q, state.dept, state.year, state.history.slice(-4), checkText]);
+    const st = await colabCall("grad.start", [q, state.dept, state.year, state.history.slice(-4), checkText,
+      auto && auto.record ? auto.record : null]);
     let last = null;
     for (let i = 0; i < 2400; i++) {               // 최대 약 10분
       await sleep(i < 10 ? 150 : 300);
@@ -748,6 +791,7 @@ function welcome() {
 /* ---------------- 시작 ---------------- */
 fillProfile(); renderReqPanel(); renderForm();
 $("#courses").value = store.get("grad.courses", "");
+$("#credits").value = store.get("grad.credits", ""); state.credits = $("#credits").value === "" ? null : +$("#credits").value;
 recompute(); route(); welcome();
 if (KERNEL) {
   document.documentElement.classList.add("colab");

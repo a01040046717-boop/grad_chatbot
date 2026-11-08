@@ -14,7 +14,7 @@ from .checker import _norm, get_requirement_items
 
 KNUM = {"한": 1, "두": 2, "세": 3, "네": 4, "다섯": 5, "여섯": 6, "일곱": 7, "여덟": 8, "아홉": 9, "열": 10}
 NUM = r"(\d+|다섯|여섯|일곱|여덟|아홉|한|두|세|네|열)"
-NEG = re.compile(r"^.{0,6}?(안\s*했|안\s*함|못|아직|없|안\s*땄|안\s*받|불합격|떨어)")
+NEG = re.compile(r"^.{0,6}?(안\s*했|안\s*함|안\s*들|안\s*봤|안\s*해|못|아직|없|안\s*땄|안\s*받|불합격|떨어)")
 CHECK_INTENT = re.compile(r"졸업\s*(가능|할\s*수|돼|되)|충족|부족|모자|남은|남았|몇\s*점|판정|채웠|채워|계산")
 
 # check 항목: 이름에 들어 있는 핵심어 → 문장에서 찾을 단어들
@@ -83,9 +83,11 @@ def extract_inputs(text: str, dept: str, year: int) -> dict:
     for n in sorted(names, key=lambda x: -len(_norm(x))):
         k = _norm(n)
         if k and k in rest:
+            rest = rest.replace(k, "■")
+            if negated(text, n):          # '봉사학습은 안 들었어'
+                continue
             courses.append(n)
             recog.append(f"과목 {n}")
-            rest = rest.replace(k, "■")
     for it in spec["items"]:      # 'XX 캡스톤디자인 2과목' 같은 패턴 과목(사물인터넷)
         if it["type"] == "choose" and it.get("pattern"):
             m = re.search(_pat(it["pattern"]) + r"[^0-9]{0,6}" + NUM + r"\s*(과목|개)", text)
@@ -103,7 +105,8 @@ def extract_inputs(text: str, dept: str, year: int) -> dict:
                     n = _find_count(text, words)
                     if n is not None:
                         acts[iid] = n
-                        recog.append(f"{re.sub(r'\s*\d+회$', '', name)} {n}회")
+                        short = re.sub(r"\s*\d+회$", "", name)
+                        recog.append(f"{short} {n}회")
                     break
         elif t == "check":
             for core, words in CHECK_KEYS:
@@ -170,11 +173,146 @@ def extract_inputs(text: str, dept: str, year: int) -> dict:
                     recog.append(f"{core} {m.group(1)}점")
             if subs or other:
                 acts[iid] = {"subitems": subs, "other": other}
-    return {"courses": courses, "activities": acts, "recognized": recog}
+    credits = extract_credits(text)
+    if credits is not None:
+        recog.append(f"총 이수학점 {credits}학점")
+    return {"courses": courses, "activities": acts, "recognized": recog, "credits": credits}
+
+
+# ----------------------------------------------------------------------------
+# 총 이수학점 (학칙 제33조: 130학점 이상)
+# ----------------------------------------------------------------------------
+CREDIT_RE = re.compile(r"(?:총|지금까지|현재|이수한|들은|딴|취득한)\s*(\d{2,3})\s*학점(?!\s*(?:이상|필요|들어야|이수해야|채워야|인가|인지|맞))"
+                       r"|(\d{2,3})\s*학점\s*(?:들었|이수했|채웠|이야|야\b|있어|땄|받았|취득했|했)")
+
+
+def extract_credits(text: str) -> int | None:
+    m = CREDIT_RE.search(text)
+    if not m:
+        return None
+    n = int(m.group(1) or m.group(2))
+    return n if 0 < n <= 200 else None
+
+
+def credit_line(credits, req: dict | None = None) -> str | None:
+    if credits is None:
+        return None
+    total = ((req or {}).get("meta", {}).get("grad_credits") or {}).get("total", 130)
+    left = total - credits
+    return (f"졸업학점(학칙 제33조, {total}학점 이상): {credits:g} / {total}학점 → "
+            + ("충족" if left <= 0 else f"{left:g}학점 부족") + " (다면적 졸업인증과 별개의 졸업요건)")
+
+
+# ----------------------------------------------------------------------------
+# 대화 누적: 여러 메시지에 나눠 말한 과목·활동을 하나의 기록으로 합친다
+# ----------------------------------------------------------------------------
+HYPO = re.compile(r"하면|한다면|했다면|으면|라면")
+RESET_RE = re.compile(r"처음부터\s*다시|초기화|리셋|다\s*지워|전부\s*지워|새로\s*시작")
+MORE_RE = re.compile(r"(\d+|한|두|세|네|다섯)\s*(번|회)\s*더|더\s*(\d+|한|두|세|네|다섯)\s*(번|회)")
+
+
+def negated(text: str, word: str) -> bool:
+    """문장에서 word 바로 뒤에 부정 표현이 오는가 ('봉사학습은 안 했어')"""
+    low = text.lower()
+    for m in re.finditer(_pat(word), low, re.I):
+        if NEG.search(low[m.end():m.end() + 12]):
+            return True
+    return False
+
+
+def new_record(dept: str, year: int) -> dict:
+    return {"dept": dept, "year": year, "courses": [], "activities": {}, "credits": None}
+
+
+def has_any(rec: dict | None) -> bool:
+    return bool(rec and (rec["courses"] or rec["activities"] or rec.get("credits") is not None))
+
+
+def wants_judgement(text: str, ext: dict, rec: dict | None = None, spec: dict | None = None) -> bool:
+    """판정 요청이거나, 이수 사실을 말했거나('봉사학습도 들었어'), 총 이수학점을 말했거나,
+    이미 기록된 항목을 부정했거나('봉사학습은 안 들었어'), 초기화 요청이면 판정한다"""
+    if RESET_RE.search(text) or is_check_request(text) or ext.get("credits") is not None:
+        return True
+    if DONE_SIGNAL.search(text) and ext["recognized"] and not HYPO.search(text):   # '통과하면 어떻게 돼?' 는 가정
+        return True
+    return bool(rec and spec and recorded_negation(text, rec, spec))
+
+
+def recorded_negation(text: str, rec: dict, spec: dict) -> bool:
+    items = {it["id"]: it for it in spec["items"]}
+    if any(negated(text, c) for c in rec["courses"]):
+        return True
+    return any(iid in items and negated(text, re.sub(r"\s*\(.*$", "", items[iid]["name"])) for iid in rec["activities"])
+
+
+def merge_record(rec: dict, ext: dict, text: str, spec: dict) -> dict:
+    """이전 기록 + 이번 문장. '2번 더'는 횟수에 더하고, '안 했어'는 기록에서 뺀다."""
+    if RESET_RE.search(text):
+        rec = new_record(rec["dept"], rec["year"])
+    rec = {"dept": rec["dept"], "year": rec["year"], "courses": list(rec["courses"]),
+           "activities": dict(rec["activities"]), "credits": rec.get("credits")}
+    items = {it["id"]: it for it in spec["items"]}
+    more = bool(MORE_RE.search(text))
+    for c in ext["courses"]:
+        if c not in rec["courses"]:
+            rec["courses"].append(c)
+    for iid, v in ext["activities"].items():
+        old, t = rec["activities"].get(iid), items[iid]["type"]
+        if t == "count" and more and isinstance(old, (int, float)):
+            rec["activities"][iid] = old + v
+        elif t == "points" and isinstance(old, dict) and isinstance(v, dict):
+            subs = dict(old.get("subitems", {}))
+            for k, x in v.get("subitems", {}).items():
+                prev = subs.get(k)
+                add = more and not isinstance(x, bool) and isinstance(prev, (int, float)) and not isinstance(prev, bool)
+                subs[k] = prev + x if add else x
+            rec["activities"][iid] = {"subitems": subs, "other": v.get("other") or old.get("other", 0)}
+        else:
+            rec["activities"][iid] = v
+    if ext.get("credits") is not None:
+        rec["credits"] = ext["credits"]
+    for c in list(rec["courses"]):
+        if negated(text, c):
+            rec["courses"].remove(c)
+    for iid in list(rec["activities"]):
+        if iid in items and negated(text, re.sub(r"\s*\(.*$", "", items[iid]["name"])) and iid not in ext["activities"]:
+            del rec["activities"][iid]
+    return rec
+
+
+def describe_record(rec: dict, spec: dict) -> list[str]:
+    """기록을 사람이 읽는 목록으로"""
+    items = {it["id"]: it for it in spec["items"]}
+    out = [f"과목 {c}" for c in rec["courses"]]
+    for iid, v in rec["activities"].items():
+        it = items.get(iid)
+        if not it:
+            continue
+        name, t = it["name"], it["type"]
+        short = re.sub(r"\s*\d+회$", "", name)
+        core = re.sub(r"\s*\(.*$", "", name)
+        if t == "count":
+            out.append(f"{short} {v:g}회")
+        elif t == "all_of":
+            out.append(f"{name} ({', '.join(v)})")
+        elif t == "topcit_rule":
+            out.append(f"TOPCIT 응시 {v.get('attempts', 0)}회, 수준 {v.get('level', 0)}")
+        elif t == "points" and isinstance(v, dict):
+            for k, x in v.get("subitems", {}).items():
+                out.append(k if x is True else f"{k} {x:g}" if isinstance(x, (int, float)) else f"{k} {x}")
+            if v.get("other"):
+                out.append(f"{core} {v['other']:g}점")
+        elif t == "points":
+            out.append(f"{name} {v:g}점")
+        else:
+            out.append(name)
+    if rec.get("credits") is not None:
+        out.append(f"총 이수학점 {rec['credits']:g}학점")
+    return out
 
 
 HOWTO_INTENT = re.compile(r"어떻게|방법|뭐야|뭔가|무엇|어디서")
-DONE_SIGNAL = re.compile(r"졸업\s*(가능|할\s*수|돼|되)|판정|들었|했어|했고|했는데|땄|취득했|이수했|참여했|응시했")
+DONE_SIGNAL = re.compile(r"졸업\s*(가능|할\s*수|돼|되)|판정|들었|했어|했고|했는데|했음|땄|취득했|이수했|참여했|응시했|받았|통과|다녀왔|마쳤|끝냈|수료|합격")
 
 
 def is_check_request(text: str) -> bool:

@@ -66,11 +66,13 @@ def build_demo(default_dept: str = "AI·빅데이터학과", default_year: int =
 
     with gr.Blocks(title="SW융합대학 졸업요건 챗봇") as demo:
         gr.Markdown(f"# 🎓 SW융합대학 다면적 졸업인증제 챗봇\n"
-                    f"상태: **{mode}** · 참고 문서: {', '.join(sources)} · 청크 {len(retriever.chunks)}개")
+                    f"상태: **{mode}** · 검색: {getattr(retriever, 'search_mode', 'TF-IDF')} · "
+                    f"참고 문서: {', '.join(sources)} · 청크 {len(retriever.chunks)}개")
         with gr.Row():
             dept = gr.Dropdown(DEPTS, value=default_dept, label="학과")
             year = gr.Number(value=default_year, precision=0, label="학번(입학년도)")
         check_state = gr.State("")
+        memory = gr.State({})          # 채팅으로 말한 이수 기록 (대화 누적, 학과|학번 별)
 
         # ------------------------------------------------------------- Q&A 탭
         with gr.Tab("💬 졸업요건 Q&A"):
@@ -104,26 +106,28 @@ def build_demo(default_dept: str = "AI·빅데이터학과", default_year: int =
                     extra.append("<sub>" + "<br>".join(tail) + "</sub>")
                 return text + (APPENDIX_MARK + "\n\n".join(extra) if extra else "")
 
-            def respond(m, hist, d, y, chk):
+            def respond(m, hist, d, y, chk, mem):
+                mem = mem if isinstance(mem, dict) else {}
                 if not m.strip():
-                    yield "", hist
+                    yield "", hist, mem
                     return
                 hist = hist or []
                 h = [{"role": x["role"], "content": _text(x["content"])} for x in hist if isinstance(x, dict)]
                 base = hist + [{"role": "user", "content": m}]
-                yield "", base + [{"role": "assistant", "content": "⏳ 문서를 찾는 중이에요…"}]
+                yield "", base + [{"role": "assistant", "content": "⏳ 문서를 찾는 중이에요…"}], mem
                 try:
-                    for ev in answer_stream(m, retriever, client, h, {"department": d, "year": int(y)}, chk or None):
+                    for ev in answer_stream(m, retriever, client, h, {"department": d, "year": int(y)}, chk or None,
+                                            memory=mem):
                         if isinstance(ev, str):
-                            yield "", base + [{"role": "assistant", "content": ev + " ▌"}]
+                            yield "", base + [{"role": "assistant", "content": ev + " ▌"}], mem
                         else:
-                            yield "", base + [{"role": "assistant", "content": _final_text(ev)}]
+                            yield "", base + [{"role": "assistant", "content": _final_text(ev)}], mem
                 except Exception as e:
-                    yield "", base + [{"role": "assistant", "content": f"⚠️ 오류: {e}"}]
+                    yield "", base + [{"role": "assistant", "content": f"⚠️ 오류: {e}"}], mem
 
-            msg.submit(respond, [msg, chatbot, dept, year, check_state], [msg, chatbot])
-            send.click(respond, [msg, chatbot, dept, year, check_state], [msg, chatbot])
-            clear.click(lambda: [], None, chatbot)
+            msg.submit(respond, [msg, chatbot, dept, year, check_state, memory], [msg, chatbot, memory])
+            send.click(respond, [msg, chatbot, dept, year, check_state, memory], [msg, chatbot, memory])
+            clear.click(lambda: ([], {}), None, [chatbot, memory])
 
         # ------------------------------------------------------------- 자가진단 탭
         with gr.Tab("✅ 졸업 자가진단"):
