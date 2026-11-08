@@ -274,7 +274,7 @@ function formatContext(hits) {
 const KNUM = { "한": 1, "두": 2, "세": 3, "네": 4, "다섯": 5, "여섯": 6, "일곱": 7, "여덟": 8, "아홉": 9, "열": 10 };
 const NUMP = "(\\d+|다섯|여섯|일곱|여덟|아홉|한|두|세|네|열)";
 const NEGP = /^.{0,6}?(안\s*했|안\s*함|안\s*들|안\s*봤|안\s*해|못|아직|없|안\s*땄|안\s*받|불합격|떨어|빼고|제외|말고)/;
-const CHECK_INTENT = /졸업\s*(가능|할\s*수|돼|되)|충족|부족|모자|남은|남았|몇\s*점|판정|채웠|채워|계산/;
+const CHECK_INTENT = /졸업\s*(가능|할\s*수|돼|되)|충족|부족|모자|남은|남았|(내|지금|현재)\s*(점수|몇\s*점)|판정|채웠|채워|계산/;
 const CHECK_KEYS = [["코딩역량", ["코딩역량", "코딩인증"]], ["AI·SW전공역량", ["ai·sw전공역량", "aisw전공역량", "aisw역량", "전공역량졸업인증", "aisw"]],
   ["학술제", ["학술제"]], ["중핵교양", ["중핵교양", "국제사회언어"]], ["학습윤리-기본", ["학습윤리기본", "학습윤리-기본"]], ["학습윤리-심화", ["학습윤리심화", "학습윤리-심화"]],
   ["국제박람회", ["국제박람회", "박람회"]], ["진로(취업)지도", ["진로지도", "취업지도"]], ["간담회", ["간담회"]]];
@@ -317,7 +317,7 @@ function extractInputs(text, dept, year, REQ) {
     if (it.type === "choose") [...(it.options || []), ...(it.substitutes || [])].forEach((n) => names.add(n));
   }
   let rest = norm(text);
-  for (const n of [...names].sort((a, b) => norm(b).length - norm(a).length)) {
+  for (const n of [...names].sort((a, b) => norm(b).length - norm(a).length || (a < b ? -1 : a > b ? 1 : 0))) {
     const k = norm(n);
     if (k && rest.includes(k)) { rest = rest.split(k).join("■"); if (negated(text, n)) continue;   // '봉사학습은 안 들었어'
       courses.push(n); recog.push(`과목 ${n}`); }
@@ -447,6 +447,7 @@ function recordedNegation(text, rec, spec) {
   return rec.courses.some((c) => negated(text, c)) || Object.keys(rec.activities).some((id) => items[id] && negated(text, coreName(items[id].name)));
 }
 function wantsJudgement(text, ext, rec, spec) {
+  if (isStatusQuestion(text)) return false;   // '인간사랑 수강했어?' 는 기록하지 않음
   if (RESET_RE.test(text) || isCheckRequest(text) || (ext.credits !== null && ext.credits !== undefined)) return true;
   if (ext.recognized.length && !HYPO.test(text) && (DONE_SIGNAL.test(text) || DONE_EXTRA.test(text) || !QUESTION.test(text))) return true;
   return !!(rec && spec && recordedNegation(text, rec, spec));
@@ -498,5 +499,55 @@ const DONE_SIGNAL = /졸업\s*(가능|할\s*수|돼|되)|판정|들었|했어|�
 // '…어떻게 채워?' 같은 방법 질문은 판정 요청이 아님 (들었/했 등 이수 사실을 말하면 판정)
 const isCheckRequest = (t) => CHECK_INTENT.test(t) && !(HOWTO_INTENT.test(t) && !DONE_SIGNAL.test(t));
 
-if (typeof module !== "undefined") module.exports = { extractInputs, isCheckRequest, wantsJudgement, mergeRecord, newRecord, hasAny, describeRecord, creditLine, extractCredits, RESET_RE, CATEGORIES, GROUPS, SECTIONS, norm, parseCourseList, resolveDepartment, parseYear, getRequirementItems,
+/* ---------- 질문에 나온 항목의 기준 (항목별로 따로) + '인간사랑 수강했어?' 상태 질문 (Python rag/extract.py 와 같은 규칙) ---------- */
+const ITEM_EXTRA = { "코딩역량인증제": ["코딩역량", "코딩인증"], "sw전공역량졸업인증제": ["전공역량"], "자기주도상담": ["자기주도"],
+  "비교과자율활동": ["자율활동"], "경진대회참가": ["경진대회", "공모전"], "경진대회수상": ["경진대회", "수상"],
+  "학과활동": ["학과행사"], "자기개발과전공탐색": ["전공탐색"], "예비창업설계": ["예창"], "자격증": ["자격"] };
+const ITEM_STOP = new Set(["과목", "택1", "택2", "택3", "이상", "lv2", "ai", "sw", "it", "학기", "12학기"]);
+function itemKeys(it) {
+  const base = it.name.replace(/\(.*?\)/g, " ");
+  const keys = new Set(base.split(/[/·\-\s]+/).map(norm).filter((t) => t.length >= 2 && !ITEM_STOP.has(t)));
+  for (const k of [...keys]) (ITEM_EXTRA[k] || []).forEach((x) => keys.add(norm(x)));
+  if (norm(it.name).includes("asp")) keys.add("asp");
+  return keys;
+}
+const shortCat = (c) => c.replace(/^(소통하는|융합하는|공헌하는)\s*/, "");
+function itemFact(it) {
+  const t = it.type, pts = it.points;
+  let head = `${it.name}: ${fmtg(pts)}점 (${it.section}, ${shortCat(it.category)})`;
+  if (t === "count") head += ` — 회당 ${fmtg(it.per)}점, ${Math.ceil(pts / it.per)}회 필요`;
+  else if (t === "all_of") head += ` — ${it.parts.join("·")} 모두 이수해야 인정`;
+  else if (t === "course") head += " — 해당 과목 이수";
+  else if (t === "choose") head += ` — ${(it.options || [it.pattern || ""]).join(", ")} 중 ${it.n}과목`;
+  else if (t === "points" && (it.subitems || []).length) {
+    const byPts = new Map(), rest = [];
+    for (const s of it.subitems) {
+      if (s.mode === "check" && s.points !== undefined) { if (!byPts.has(s.points)) byPts.set(s.points, []); byPts.get(s.points).push(s.name.replace(/\s*취득$/, "")); }
+      else rest.push(s.name + (s.per ? ` 회당 ${fmtg(s.per)}점` : ""));
+    }
+    const parts = [...[...byPts].map(([k, v]) => `${v.join(" / ")} 중 하나 취득 ${fmtg(k)}점`), ...rest];
+    head += " — 인정: " + parts.join("; ") + ` (이 항목은 합쳐서 최대 ${fmtg(pts)}점)`;
+  } else if (t === "points") head += " — 세부 활동 점수 합산 (비교과일람표에 인정된 점수)";
+  const note = (it.note || "").split(" · ")[0];
+  if (note && t !== "count" && t !== "all_of" && !note.startsWith("세부 프로그램")) head += ` ※ ${note}`;
+  return head;
+}
+function itemFacts(text, dept, year, REQ) {
+  const spec = getRequirementItems(dept, year, REQ); if (spec.error) return [];
+  const nt = norm(text);
+  return spec.items.filter((it) => [...itemKeys(it)].some((k) => k && nt.includes(k))).map(itemFact);
+}
+const ASKED_RE = /(들었|했|이수했|수강했|땄|받았|통과했|참여했|봤)(어|어요|나|나요|니|냐|지|죠|을까)?\s*[?？]|(들었|했|이수했|수강했|땄|받았|통과했|참여했)(나|니|냐|는지|는\s*지)/;
+const isStatusQuestion = (t) => ASKED_RE.test(t) && !/졸업\s*(가능|할\s*수)/.test(t);
+const askedItemIds = (text, spec) => { const nt = norm(text); return spec.items.filter((it) => [...itemKeys(it)].some((k) => k && nt.includes(k))).map((it) => it.id); };
+function statusLines(res, ids) {
+  return res.items.filter((r) => ids.includes(r.id)).map((r) => {
+    const short = r.name.replace(/\s*\(.*$/, "");
+    if (r.passed) return `✅ ${r.name}: 이수로 확인됨 (${fmtg(r.earned)}/${fmtg(r.required)}점 · ${r.detail})`;
+    if (r.earned > 0) return `🔶 ${r.name}: 일부만 확인됨 (${fmtg(r.earned)}/${fmtg(r.required)}점 · ${r.detail})`;
+    return `⬜ ${r.name}: 아직 확인되지 않음 (입력·언급된 기록 없음) — 자가진단 탭에서 체크하거나 '${short} 들었어/했어'라고 말해 주세요`;
+  });
+}
+
+if (typeof module !== "undefined") module.exports = { itemFacts, isStatusQuestion, askedItemIds, statusLines, extractInputs, isCheckRequest, wantsJudgement, mergeRecord, newRecord, hasAny, describeRecord, creditLine, extractCredits, RESET_RE, CATEGORIES, GROUPS, SECTIONS, norm, parseCourseList, resolveDepartment, parseYear, getRequirementItems,
   checkGraduation, formatResultText, compactRequirements, buildIndex, search, detectProfile, KINDS };

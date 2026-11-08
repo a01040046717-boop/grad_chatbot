@@ -382,7 +382,7 @@ function renderForm() {
         if (opts.length) extra = `<div class="subs">${opts.map((o, j) => `<label><input type="checkbox" id="${id}-${j}" data-id="${it.id}" data-t="list" value="${esc(o)}">${esc(o)}</label>`).join("")}</div>`;
       } else if (it.type === "points" && !(it.subitems || []).length) {
         ctrl = `<input type="number" min="0" max="${it.points}" step="0.5" value="0" id="${id}-other" data-id="${it.id}" data-t="other" aria-label="${esc(it.name)} 취득 점수"><span class="small muted">점</span>`;
-        hint = it.note || "비교과일람표에 인정된 취득 점수를 입력하세요";
+        hint = it.note || "비교과일람표에 인정된 점수를 입력하세요";
       } else if (it.type === "points") {
         hint = it.note || "해당하는 세부 활동을 입력하면 점수가 합산됩니다";
         extra = `<div class="subs">${(it.subitems || []).map((sb, j) => {
@@ -612,7 +612,7 @@ function bestLineScore(q, c) {
 }
 
 /* 졸업 자가진단 탭의 입력을 판정용 기록으로 (과목 리스트 + 체크·횟수·점수 + 총 이수학점) */
-const STATUS_Q = /부족|충족|남은|남았|모자|채워|채우|졸업\s*(가능|할\s*수|돼|되)|현황|내\s*점수|뭐\s*더|뭘\s*더|더\s*해야|우선순위|판정|몇\s*점/;
+const STATUS_Q = /부족|충족|남은|남았|모자|채워|채우|졸업\s*(가능|할\s*수|돼|되)|현황|(내|지금|현재)\s*(점수|몇\s*점)|뭐\s*더|뭘\s*더|더\s*해야|우선순위|판정/;
 function cleanActs(acts) {
   const out = {};
   for (const [k, v] of Object.entries(acts || {})) {
@@ -635,6 +635,8 @@ function combineRecords(tab, chat) {
 }
 
 function autoJudgeMarkdown(auto) {
+  if (auto.status) return [`**물어본 항목의 현재 기록** (${auto.res.department} ${auto.res.year}학번)`, "", ...auto.status.map((l) => `- ${l}`), "",
+    `_지금까지 자가진단 탭에 입력하거나 대화로 말한 내용 기준 · 총점 ${fmt(auto.res.totalEarned)}/${fmt(auto.res.totalRequired)}점. 기록이 없는 항목은 '미수강'이 아니라 아직 확인되지 않은 것이에요._`].join("\n");
   if (auto.reset) return "대화로 말씀하신 이수 기록을 모두 지웠어요. 들은 과목과 활동을 다시 말씀해 주세요." + (auto.tab ? " (졸업 자가진단 탭에 입력한 내용은 그대로예요.)" : "");
   const r = auto.res, cols = GROUPS.flatMap((g) => Object.keys(r.matrix[g]).map((c) => [g, c]));
   const L = [`**지금까지 입력·말씀하신 내용으로 계산한 졸업인증 판정** (${r.department} ${r.year}학번)`,
@@ -644,7 +646,8 @@ function autoJudgeMarkdown(auto) {
     "|---|" + cols.map(() => "---").join("|") + "|---|",
     "| 필요 | " + cols.map(([g, c]) => fmt(r.matrix[g][c].required)).join(" | ") + ` | ${fmt(r.totalRequired)} |`,
     "| 이수 | " + cols.map(([g, c]) => fmt(r.matrix[g][c].earned)).join(" | ") + ` | ${fmt(r.totalEarned)} |`];
-  if (r.missing.length) { L.push("", `**부족한 항목 ${r.missing.length}개** (모두 표시)`); r.missing.forEach((m) => L.push(`- ${m.name}: ${fmt(m.need)}점 부족 (${m.detail})`)); }
+  if (r.missing.length) { L.push("", `**아직 채우지 못한 항목 ${r.missing.length}개** (모두 표시 · 입력하거나 말하지 않은 항목도 여기에 들어가요)`);
+    r.missing.forEach((m) => L.push(`- ${m.name}: ${fmt(m.need)}점 부족 (${m.detail === "미이수" ? "아직 확인 안 됨" : m.detail})`)); }
   if (auto.credit) L.push("", `**${auto.credit.split(" (")[0]}** (다면적 졸업인증과 별개의 졸업요건)`);
   L.push("", "_이어서 말해도 돼요: “봉사학습도 들었어”, “학과활동 2번 더 했어”, “총 115학점이야”, “처음부터 다시”_");
   return L.join("\n");
@@ -674,15 +677,18 @@ function offlineAnswer(q, hits, auto, footer = true) {
   if (wantsCheck && state.touched && state.lastCheck && !state.lastCheck.error)
     parts.push(`**자가진단 결과**\n\`\`\`\n${formatResultText(state.lastCheck)}\n\`\`\``);
   else if (wantsCheck) parts.push("졸업 가능 여부는 **졸업 자가진단** 탭에서 과목과 활동을 입력하면 바로 계산돼요.");
-  const wantsAll = /전체|기준|요건|알려/.test(q) && !/몇|어디|뭐|무엇/.test(q);
+  const [fd, fy] = detectProfile(q, REQ);
+  const facts = itemFacts(q, fd || state.dept, fy || state.year, REQ);
+  if (facts.length) parts.push(`**${resolveDepartment(fd || state.dept, REQ) || state.dept} ${fy || state.year}학번 · 질문한 항목의 기준** (항목마다 점수가 달라요)\n` + facts.map((f) => `- ${f}`).join("\n"));
+  const wantsAll = /전체|기준|요건|알려/.test(q) && !/몇|어디|뭐|무엇/.test(q) && !facts.length;
   const ov = /전체|총점|모든 항목|졸업\s*요건|인증\s*기준/.test(q) && !/몇\s*번|어디/.test(q) ? overviewMarkdown(q) : null;
   if (ov) { parts.push(ov); if (footer) parts.push("_검색 모드: 졸업인증 기준표에서 찾아 보여드렸어요._"); return parts.join("\n\n"); }
-  const lines = keyLines(q, hits, wantsAll ? 0 : 5);
+  const lines = facts.length ? [] : keyLines(q, hits, wantsAll ? 0 : 5);   // 항목 기준이 있으면 다른 학번·항목 줄은 섞지 않음
   // 공식안내 문서(.md) 섹션이 상위에 걸리면 그 섹션 전체(표 포함)를 보여준다
   const isMd = (loc) => hits.some((h) => h.chunk.location === loc && h.chunk.source.endsWith(".md"));
   const topScore = Math.max(...hits.map((h) => h.score));
   // 공식안내·추가자료 섹션 후보 중 '질문과 가장 잘 맞는 문장'을 가진 섹션을 고른다
-  const mdHit = hits.filter((h) => h.chunk.source.endsWith(".md") && h.score >= 0.5 * topScore)
+  const mdHit = hits.filter((h) => h.chunk.source.endsWith(".md") && h.score >= (facts.length ? 0.8 : 0.5) * topScore)
     .map((h) => [h, bestLineScore(q, h.chunk)]).sort((a, b) => b[1] - a[1]).map((x) => x[0])[0];
   if (mdHit) {
     const sec = mdHit.chunk;
@@ -693,7 +699,7 @@ function offlineAnswer(q, hits, auto, footer = true) {
   } else if (lines.length) {
     parts.push(`**${state.dept} ${state.year}학번 기준으로 안내문에서 찾은 내용이에요.**`);
     parts.push(lines.map((l) => `- ${l.t} <<${l.loc}>>`).join("\n"));
-  } else {
+  } else if (!facts.length) {
     const top = hits.find((h) => !h.chunk.location.startsWith("p.")) || hits[0];
     if (top) parts.push(`**[문서 1] ${top.chunk.location}**\n\`\`\`\n${top.chunk.text.slice(0, 1200)}\n\`\`\``);
   }
@@ -718,7 +724,12 @@ async function ask(q) {
       const e = extractInputs(q, jd, jy, REQ);
       const said = wantsJudgement(q, e, base, spec);
       const tab = tabRecord(spec.department, jy);           // 졸업 자가진단 탭에 체크·입력한 내용
-      if (said || (tab && STATUS_Q.test(q))) {
+      const asked = isStatusQuestion(q) ? askedItemIds(q, spec) : [];
+      if (asked.length) {   // '인간사랑 수강했어?' → 물어본 항목만, 지금까지의 기록(탭 + 대화)으로 답함
+        const all = tab ? combineRecords(tab, base) : base;
+        const r = checkGraduation(jd, jy, all.courses, all.activities, REQ);
+        if (!r.error) auto = { status: statusLines(r, asked), res: r, record: all, tab: !!tab };
+      } else if (said || (tab && STATUS_Q.test(q))) {
         const rec = said ? mergeRecord(base, e, q, spec) : base; state.records[key] = rec;
         if (said && RESET_RE.test(q) && !hasAny(rec)) auto = { reset: true, tab: !!tab };
         else {

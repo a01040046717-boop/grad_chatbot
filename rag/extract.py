@@ -15,7 +15,7 @@ from .checker import _norm, get_requirement_items
 KNUM = {"한": 1, "두": 2, "세": 3, "네": 4, "다섯": 5, "여섯": 6, "일곱": 7, "여덟": 8, "아홉": 9, "열": 10}
 NUM = r"(\d+|다섯|여섯|일곱|여덟|아홉|한|두|세|네|열)"
 NEG = re.compile(r"^.{0,6}?(안\s*했|안\s*함|안\s*들|안\s*봤|안\s*해|못|아직|없|안\s*땄|안\s*받|불합격|떨어|빼고|제외|말고)")
-CHECK_INTENT = re.compile(r"졸업\s*(가능|할\s*수|돼|되)|충족|부족|모자|남은|남았|몇\s*점|판정|채웠|채워|계산")
+CHECK_INTENT = re.compile(r"졸업\s*(가능|할\s*수|돼|되)|충족|부족|모자|남은|남았|(내|지금|현재)\s*(점수|몇\s*점)|판정|채웠|채워|계산")
 
 # check 항목: 이름에 들어 있는 핵심어 → 문장에서 찾을 단어들
 CHECK_KEYS = [
@@ -97,7 +97,7 @@ def extract_inputs(text: str, dept: str, year: int) -> dict:
         if it["type"] == "choose":
             names.update(it.get("options", []) + it.get("substitutes", []))
     rest = nt
-    for n in sorted(names, key=lambda x: -len(_norm(x))):
+    for n in sorted(names, key=lambda x: (-len(_norm(x)), x)):      # 길이 → 이름 순 (항상 같은 순서)
         k = _norm(n)
         if k and k in rest:
             rest = rest.replace(k, "■")
@@ -304,7 +304,10 @@ def has_any(rec: dict | None) -> bool:
 
 def wants_judgement(text: str, ext: dict, rec: dict | None = None, spec: dict | None = None) -> bool:
     """판정 요청이거나, 이수 사실을 말했거나('봉사학습도 들었어'), 총 이수학점을 말했거나,
-    이미 기록된 항목을 부정했거나('봉사학습은 안 들었어'), 초기화 요청이면 판정한다"""
+    이미 기록된 항목을 부정했거나('봉사학습은 안 들었어'), 초기화 요청이면 판정한다.
+    '인간사랑 수강했어?' 처럼 이수 여부를 묻는 질문은 기록하지 않는다 (is_status_question)."""
+    if is_status_question(text):
+        return False
     if RESET_RE.search(text) or is_check_request(text) or ext.get("credits") is not None:
         return True
     if ext["recognized"] and not HYPO.search(text) and (               # '통과하면 어떻게 돼?' 는 가정
@@ -397,3 +400,98 @@ def is_check_request(text: str) -> bool:
     if not CHECK_INTENT.search(text):
         return False
     return not (HOWTO_INTENT.search(text) and not DONE_SIGNAL.search(text))
+
+
+# ----------------------------------------------------------------------------
+# 질문에 나온 항목의 기준 ('졸업필수활동은 몇 점?', '자격증 점수는?') → 항목별로 따로 정리
+# ----------------------------------------------------------------------------
+_ITEM_EXTRA = {"코딩역량인증제": ["코딩역량", "코딩인증"], "sw전공역량졸업인증제": ["전공역량"], "자기주도상담": ["자기주도"],
+               "비교과자율활동": ["자율활동"], "경진대회참가": ["경진대회", "공모전"], "경진대회수상": ["경진대회", "수상"],
+               "학과활동": ["학과행사"], "자기개발과전공탐색": ["전공탐색"], "예비창업설계": ["예창"], "자격증": ["자격"]}
+_ITEM_STOP = {"과목", "택1", "택2", "택3", "이상", "lv2", "ai", "sw", "it", "학기", "12학기"}
+
+
+def item_keys(it: dict) -> set:
+    base = re.sub(r"\(.*?\)", " ", it["name"])
+    keys = {_norm(t) for t in re.split(r"[/·\-\s]+", base) if len(_norm(t)) >= 2 and _norm(t) not in _ITEM_STOP}
+    for k in list(keys):
+        keys.update(_norm(x) for x in _ITEM_EXTRA.get(k, []))
+    if "asp" in _norm(it["name"]):
+        keys.add("asp")
+    return keys
+
+
+def _short_cat(c: str) -> str:
+    return re.sub(r"^(소통하는|융합하는|공헌하는)\s*", "", c)
+
+
+def item_fact(it: dict) -> str:
+    t, pts = it["type"], it["points"]
+    head = f"{it['name']}: {pts:g}점 ({it['section']}, {_short_cat(it['category'])})"
+    if t == "count":
+        head += f" — 회당 {it['per']:g}점, {-(-pts // it['per']):g}회 필요"
+    elif t == "all_of":
+        head += f" — {'·'.join(it['parts'])} 모두 이수해야 인정"
+    elif t == "course":
+        head += " — 해당 과목 이수"
+    elif t == "choose":
+        head += f" — {', '.join(it.get('options') or [it.get('pattern', '')])} 중 {it['n']}과목"
+    elif t == "points" and it.get("subitems"):
+        by_pts, rest = {}, []
+        for s in it["subitems"]:
+            if s["mode"] == "check" and "points" in s:
+                by_pts.setdefault(s["points"], []).append(re.sub(r"\s*취득$", "", s["name"]))
+            else:
+                rest.append(s["name"] + (f" 회당 {s['per']:g}점" if s.get("per") else ""))
+        parts = [f"{' / '.join(v)} 중 하나 취득 {k:g}점" for k, v in by_pts.items()] + rest
+        head += " — 인정: " + "; ".join(parts) + f" (이 항목은 합쳐서 최대 {pts:g}점)"
+    elif t == "points":
+        head += " — 세부 활동 점수 합산 (비교과일람표에 인정된 점수)"
+    note = (it.get("note") or "").split(" · ")[0]
+    if note and t not in ("count", "all_of") and not note.startswith("세부 프로그램"):
+        head += f" ※ {note}"
+    return head
+
+
+def item_facts(text: str, dept: str, year: int) -> list[str]:
+    """질문에 이름이 나온 항목들의 기준을 한 줄씩 (항목마다 점수가 다르므로 섞이지 않게)"""
+    spec = get_requirement_items(dept, year)
+    if "error" in spec:
+        return []
+    nt = _norm(text)
+    return [item_fact(it) for it in spec["items"] if any(k and k in nt for k in item_keys(it))]
+
+
+# ----------------------------------------------------------------------------
+# '인간사랑 수강했어?' → 물어본 항목만, 지금까지의 기록(자가진단 탭 + 대화)으로 답한다
+# ----------------------------------------------------------------------------
+ASKED_RE = re.compile(r"(들었|했|이수했|수강했|땄|받았|통과했|참여했|봤)(어|어요|나|나요|니|냐|지|죠|을까)?\s*[?？]"
+                      r"|(들었|했|이수했|수강했|땄|받았|통과했|참여했)(나|니|냐|는지|는\s*지)")
+
+
+def is_status_question(text: str) -> bool:
+    return bool(ASKED_RE.search(text)) and not re.search(r"졸업\s*(가능|할\s*수)", text)
+
+
+def asked_item_ids(text: str, spec: dict) -> list[str]:
+    nt = _norm(text)
+    return [it["id"] for it in spec["items"] if any(k and k in nt for k in item_keys(it))]
+
+
+def status_lines(res, ids: list[str]) -> list[str]:
+    """CheckResult 에서 물어본 항목의 상태. 기록이 없으면 '미이수'가 아니라 '아직 확인되지 않음'"""
+    out = []
+    from types import SimpleNamespace
+    for r in res.items:
+        r = SimpleNamespace(**r) if isinstance(r, dict) else r       # CheckResult.items 는 dict 목록
+        if r.id not in ids:
+            continue
+        short = re.sub(r"\s*\(.*$", "", r.name)
+        if r.passed:
+            out.append(f"✅ {r.name}: 이수로 확인됨 ({r.earned:g}/{r.required:g}점 · {r.detail})")
+        elif r.earned > 0:
+            out.append(f"🔶 {r.name}: 일부만 확인됨 ({r.earned:g}/{r.required:g}점 · {r.detail})")
+        else:
+            out.append(f"⬜ {r.name}: 아직 확인되지 않음 (입력·언급된 기록 없음) — 자가진단 탭에서 체크하거나 "
+                       f"'{short} 들었어/했어'라고 말해 주세요")
+    return out

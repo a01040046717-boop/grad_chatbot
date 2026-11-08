@@ -405,6 +405,26 @@ def test_phrasings_and_tab_merge():
     assert a.check_result["total_earned"] == 30 and "인간사랑" not in [m["name"] for m in a.check_result["missing"]]
 
 
+def test_item_facts_and_status_questions():
+    """'졸업필수활동은 몇 점?' → 항목별 기준(섞지 않음), '인간사랑 수강했어?' → 물어본 항목만 현재 기록으로"""
+    from rag.extract import item_facts, is_check_request, is_status_question
+    D, Y = "AI·빅데이터학과", 2022
+    assert not is_check_request("졸업필수활동은 몇 점 필요해?")              # 기준 질문은 판정 요청이 아님
+    f = item_facts("졸업필수활동이랑 자격증 필요한 점수 알려줘", D, Y)
+    assert len(f) == 2 and f[0].startswith("졸업필수활동: 15점") and f[1].startswith("자격증/경진대회참가/경진대회수상: 6점")
+    assert is_status_question("인간사랑 수강했어?") and not is_status_question("인간사랑 들었어")
+    r = build_index(verbose=False)
+    prof = {"department": D, "year": Y}
+    tab = {"dept": D, "year": Y, "courses": ["인간사랑"], "activities": {}, "credits": None}
+    a = llm.answer("인간사랑 수강했어?", r, None, profile=prof, record=tab)
+    assert "✅ 인간사랑" in a.text and "봉사학습" not in a.text                # 물어본 항목만
+    a = llm.answer("봉사학습 들었나?", r, None, profile=prof, record=tab)
+    assert "아직 확인되지 않음" in a.text and "미수강" not in a.text
+    mem = {}
+    llm.answer("인간사랑 수강했어?", r, None, profile=prof, memory=mem)
+    assert not mem.get(f"{D}|{Y}")                                            # 질문은 기록하지 않음
+
+
 def test_offline_chat_judgement():
     """LLM 없이도 채팅 문장으로 졸업 판정 결과를 답한다"""
     r = build_index(verbose=False)

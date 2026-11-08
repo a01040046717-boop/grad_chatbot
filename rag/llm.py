@@ -25,7 +25,8 @@ from .checker import (check_graduation, format_result_text, get_requirement_item
                       resolve_department, parse_year, load_requirements)
 from .retriever import Retriever, format_context, detect_profile
 from .extract import (extract_inputs, is_check_request, wants_judgement, merge_record, new_record, has_any,
-                      describe_record, credit_line, RESET_RE)
+                      describe_record, credit_line, RESET_RE, item_facts, is_status_question,
+                      asked_item_ids, status_lines)
 
 CHAT_MODEL = os.getenv("CHAT_MODEL", "gpt-4o-mini")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "text-embedding-3-small")
@@ -238,12 +239,13 @@ LOCAL_SYSTEM = """너는 순천향대학교 SW융합대학 학생을 돕는 '졸
 LOCAL_CHECK_RULES = """
 졸업 판정 질문 규칙:
 - 점수와 충족 여부는 [판정 결과]의 값만 그대로 쓴다. 총점/필요점수, 충족 여부, 부족한 항목과 채우는 방법(회당 점수, 남은 횟수)을 정리한다.
-- 부족한 항목은 [판정 결과]의 '부족' 목록을 하나도 빠뜨리지 말고 모두 적는다. [판정 결과]에서 이수(점수를 받은) 항목을 미이수라고 하지 않는다.
+- 부족한 항목은 [판정 결과]의 '부족' 목록을 하나도 빠뜨리지 말고 모두 적는다. 항목마다 필요 점수가 다르므로 다른 항목의 점수를 섞지 않는다.
+- 0점인 항목은 학생이 아직 입력하거나 말하지 않은 것일 수 있으므로 '미수강'이라고 단정하지 말고 '아직 확인되지 않음'이라고 쓴다. [판정 결과]에서 이수(점수를 받은) 항목을 미이수라고 하지 않는다.
 - 학생이 말한 과목·활동이 [판정 결과]의 인식 목록에 빠져 있으면 check_graduation 도구를 호출해 다시 계산한다.
   activities 는 {항목id: 값} (check=true, count=횟수, points=점수). 항목 id 는 [항목 id 목록]을 본다."""
 
 # 내 상태를 묻는 질문 (자가진단 결과를 함께 보낼지 판단)
-STATUS_Q = re.compile(r"부족|충족|남은|남았|모자|채워|채우|졸업\s*(가능|할\s*수|돼|되)|현황|내\s*점수|뭐\s*더|뭘\s*더|더\s*해야|우선순위|판정|몇\s*점")
+STATUS_Q = re.compile(r"부족|충족|남은|남았|모자|채워|채우|졸업\s*(가능|할\s*수|돼|되)|현황|(내|지금|현재)\s*(점수|몇\s*점)|뭐\s*더|뭘\s*더|더\s*해야|우선순위|판정")
 
 APPENDIX_MARK = "\n\n---\n"   # 이 표시 뒤(핵심 근거·출처)는 대화 기록에서 제외
 
@@ -287,7 +289,7 @@ def _lcs(a: str, b: str) -> int:
     return best
 
 
-_OVERVIEW = ["전체", "총점", "합계", "몇 점", "몇점", "요건", "기준 알려", "뭐 해야", "뭘 해야"]
+_OVERVIEW = ["전체", "총점", "합계", "요건", "기준 알려", "뭐 해야", "뭘 해야"]
 
 
 def key_points(question: str, retrieved, n: int = 5) -> list[tuple[str, str]]:
@@ -363,6 +365,27 @@ def _strip_special(text: str) -> str:
     return re.sub(r"<\|[^>]*$", "", text)       # 생성 중간의 '<|im' 같은 조각도 숨김
 
 
+def status_answer(question: str, dept: str | None, year: int | None, record: dict | None = None,
+                  memory: dict | None = None):
+    """'인간사랑 수강했어?' → 물어본 항목의 현재 기록 상태 텍스트 (없으면 None)"""
+    if not (dept and year) or not is_status_question(question):
+        return None
+    spec = get_requirement_items(dept, year)
+    if "error" in spec:
+        return None
+    ids = asked_item_ids(question, spec)
+    if not ids:
+        return None
+    rec = record if record is not None else (memory or {}).get(f"{dept}|{year}") or new_record(dept, year)
+    res = check_graduation(dept, year, rec["courses"], rec["activities"])
+    return ("\n".join(status_lines(res, ids)) +
+            f"\n(지금까지 자가진단 탭에 입력하거나 대화로 말한 내용 기준 · 총점 {res.total_earned:g}/{res.total_required:g}점)")
+
+
+STATUS_RULE = ("\n→ 학생이 물어본 항목에 대해서만 위 상태대로 답하라. 다른 항목을 '미수강'이라고 말하지 말라. "
+               "'아직 확인되지 않음' 항목은 기록이 없을 뿐이므로, 들었다면 자가진단 탭에 체크하거나 대화로 알려 달라고 안내하라.")
+
+
 def chat_judgement(question: str, dept: str | None, year: int | None, record: dict | None = None,
                    memory: dict | None = None):
     """채팅 판정. → (판정 설명 텍스트, CheckResult) 또는 (None, None)
@@ -422,7 +445,8 @@ def answer_stream(question: str, retriever: Retriever, client=None, history: lis
     state = {"department": dept, "year": year, "sources": list(used), "check_result": None}
     trace = []
 
-    auto, res = chat_judgement(question, dept, year, record, memory)
+    status = status_answer(question, dept, year, record, memory)
+    auto, res = (None, None) if status else chat_judgement(question, dept, year, record, memory)
     is_check = auto is not None
     if is_check:
         state["check_result"] = res.to_dict() if res else None
@@ -433,6 +457,12 @@ def answer_stream(question: str, retriever: Retriever, client=None, history: lis
         system += f"\n\n[학생 프로필] 학과: {dept}, 학번: {year}"
     if check_text and not is_check and STATUS_Q.search(question):
         system += f"\n\n[학생이 자가진단 탭에서 입력한 최근 판정 결과]\n{check_text}"
+    if status:
+        system += "\n\n[학생이 물어본 항목의 현재 기록 상태]\n" + status + STATUS_RULE
+    facts = [] if is_check or status or not (dept and year) else item_facts(question, dept, year)
+    if facts:            # 항목마다 점수가 달라 작은 모델이 섞지 않도록 항목별 기준을 따로 준다
+        system += ("\n\n[질문한 항목의 기준 — 항목마다 점수가 다르므로 섞지 말고 항목별로 따로 답할 것]\n- "
+                   + "\n- ".join(facts))
     tools = None
     if is_check and auto:
         system += LOCAL_CHECK_RULES + f"\n\n[항목 id 목록]\n{_id_hint(dept, year)}\n\n[판정 결과 (판정 엔진 계산값)]\n{auto}"
@@ -469,8 +499,10 @@ def answer_stream(question: str, retriever: Retriever, client=None, history: lis
 
     text = (msg.content or "").strip() or "(답변을 만들지 못했어요. 아래 핵심 근거를 확인해 주세요.)"
     mine = [cs for cs in retrieved if not dept or not cs[0].department or cs[0].department == dept]
+    pts = [(f, f"졸업인증 기준표 / {dept} {year}학번") for f in facts]
+    pts += [p for p in key_points(question, mine) if not facts or not p[0].startswith(("합계", "구분:", "인재상별", "이수현황표"))]
     yield Answer(text, _dedup_sources(state["sources"]), trace, state["check_result"],
-                 points=key_points(question, mine), auto_text=auto)
+                 points=pts[:6], auto_text=auto or status)
 
 
 def parse_local(text: str, tools):
@@ -505,15 +537,25 @@ def answer(question: str, retriever: Retriever, client=None, history: list[dict]
         dept, year = d2, y2 or year
     elif y2:
         year = y2
-    auto, res = chat_judgement(question, dept, year, record, memory)
-    if auto:
+    status = status_answer(question, dept, year, record, memory)
+    auto, res = (None, None) if status else chat_judgement(question, dept, year, record, memory)
+    if status:
+        auto = status
+    if auto and res is not None:
         state["check_result"] = res.to_dict() if res else None
 
+    if client is None and status:
+        return Answer("🔌 **오프라인 모드** — 물어본 항목의 현재 기록 상태예요.\n\n" + status, _dedup_sources(retrieved), auto_text=status)
     if client is None:
         return _offline_answer(question, retrieved, check_text, auto, state["check_result"])
 
     sys_block = _profile_block(profile, check_text)
-    if auto:
+    facts = [] if auto or status or not (dept and year) else item_facts(question, dept, year)
+    if facts:
+        sys_block += "\n\n[질문한 항목의 기준 — 항목마다 점수가 다르므로 섞지 말고 항목별로 따로 답할 것]\n- " + "\n- ".join(facts)
+    if status:
+        sys_block += "\n\n[학생이 물어본 항목의 현재 기록 상태]\n" + status + STATUS_RULE
+    elif auto:
         sys_block += ("\n\n[학생 문장에서 자동 인식한 입력과 판정 결과 (판정 엔진 계산값)]\n" + auto +
                       "\n→ 이 계산값을 사용해 답하라. 학생이 말했는데 인식되지 않은 항목이 있으면 check_graduation 도구로 다시 계산하라.")
     messages = [{"role": "system", "content": SYSTEM_PROMPT + sys_block}]
