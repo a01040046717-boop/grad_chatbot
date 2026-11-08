@@ -218,13 +218,14 @@ function detectProfile(q, REQ) {
 
 function search(index, q, k, department, year, REQ) {
   const [d2, y2] = detectProfile(q, REQ);
-  department = department || d2; year = year || y2;
+  if (d2 && d2 !== department) { department = d2; year = y2 || null; }   // 질문에 적힌 학과·학번 우선
+  else { department = department || d2; year = y2 || year; }
   const qv = index.vec(charWbNgrams(q));
   const scores = index.chunks.map((c, i) => {
     let s = 0; const dv = index.vecs[i];
     for (const [g, w] of qv) { const x = dv.get(g); if (x) s += x * w; }
-    if (department) { if (c.department === department) s += 0.15; else if (c.department) s -= 0.15; }
-    if (year && c.years.length) s += c.years[0] <= year && year <= c.years[1] ? 0.12 : -0.05;
+    if (department && c.department) s += c.department === department ? 0.04 : -0.08;
+    if (year && c.years.length) s += c.years[0] <= year && year <= c.years[1] ? 0.03 : -0.05;
     return s;
   });
   const pinned = [];
@@ -232,7 +233,18 @@ function search(index, q, k, department, year, REQ) {
     if (c.years.length && c.years[0] <= year && year <= c.years[1] && (c.department === "" || (department && c.department === department))) pinned.push(i);
   });
   const order = scores.map((s, i) => i).sort((a, b) => scores[b] - scores[a]).filter((i) => !pinned.includes(i));
-  const top = [...pinned.sort((a, b) => scores[b] - scores[a]), ...order].slice(0, Math.max(k, pinned.length));
+  const nFree = Math.max(k - pinned.length, 2);
+  let free = order.slice(0, nFree);
+  if (order.length) {   // 출처 다양성: 결과에 없는 문서의 최고 청크가 충분히 관련 있으면 포함
+    const best = scores[order[0]];
+    const shown = new Set([...pinned, ...free].map((i) => index.chunks[i].source));
+    for (const i of order.slice(nFree)) {
+      const src = index.chunks[i].source;
+      if (!shown.has(src) && scores[i] >= 0.6 * best) { free = free.length >= nFree ? [...free.slice(0, -1), i] : [...free, i]; shown.add(src); }
+    }
+  }
+  const byScore = (a, b) => scores[b] - scores[a];
+  const top = [...pinned.sort(byScore), ...free.sort(byScore)];
   return top.filter((i) => scores[i] > 0 || pinned.includes(i)).map((i) => ({ chunk: index.chunks[i], score: scores[i] }));
 }
 

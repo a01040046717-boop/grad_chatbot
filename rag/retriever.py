@@ -60,7 +60,11 @@ class Retriever:
 
     def search(self, query: str, k: int = 5, department: str | None = None, year: int | None = None):
         d2, y2 = detect_profile(query)
-        department, year = department or d2, year or y2
+        # 질문에 학과·학번이 적혀 있으면 그것을 우선, 없으면 사이드바 프로필 사용
+        if d2 and d2 != department:
+            department, year = d2, (y2 or None)
+        else:
+            department, year = department or d2, y2 or year
 
         sparse = (self.sparse @ self.tfidf.transform([query]).T).toarray().ravel()
         score = sparse
@@ -68,15 +72,13 @@ class Retriever:
             qv = self._normalize(np.array(self.embedder([query])[0], dtype=np.float32))
             score = 0.6 * (self.dense @ qv) + 0.4 * sparse
 
+        # 메타데이터 보정: 다른 학과/학번 자료는 감점, 같은 학과는 소폭 가점 (검색 점수를 뒤집지 않을 정도로)
         boost = np.zeros(len(self.chunks))
         for i, c in enumerate(self.chunks):
-            if department:
-                if c.department == department:
-                    boost[i] += 0.15
-                elif c.department:
-                    boost[i] -= 0.15
+            if department and c.department:
+                boost[i] += 0.04 if c.department == department else -0.08
             if year and c.years:
-                boost[i] += 0.12 if c.years[0] <= year <= c.years[1] else -0.05
+                boost[i] += 0.03 if c.years[0] <= year <= c.years[1] else -0.05
         final = score + boost
 
         # 학번이 인식되면 해당 학번의 대학공통 청크, 학과+학번이면 해당 학과 기준 청크를 반드시 포함
@@ -87,7 +89,18 @@ class Retriever:
                     if (c.department == "" ) or (department and c.department == department):
                         pinned.append(i)
         order = [i for i in np.argsort(-final) if i not in pinned]
-        top = (sorted(pinned, key=lambda i: -final[i]) + order)[:max(k, len(pinned))]
+        n_free = max(k - len(pinned), 2)
+        free = order[:n_free]
+        # 출처 다양성: 아직 결과에 없는 문서의 최고 점수 청크가 충분히 관련 있으면 포함
+        if order:
+            best = final[order[0]]
+            shown = {self.chunks[i].source for i in pinned + free}
+            for i in order[n_free:]:
+                src = self.chunks[i].source
+                if src not in shown and final[i] >= 0.6 * best:
+                    free = free[:-1] + [i] if len(free) >= n_free else free + [i]
+                    shown.add(src)
+        top = sorted(pinned, key=lambda i: -final[i]) + sorted(free, key=lambda i: -final[i])
         return [(self.chunks[i], float(final[i])) for i in top if final[i] > 0 or i in pinned]
 
 

@@ -126,6 +126,18 @@ def test_retrieval_profile_pin():
     assert any("SQL" in c.text for c, _ in res)
 
 
+def test_retrieval_official_docs():
+    """순천향대 공식 안내 문서(docs/*.md) 내용을 프로필 유무와 관계없이 찾아야 한다"""
+    r = build_index(verbose=False)
+    cases = [("AI·SW전공역량졸업인증제 200점 어떻게 채워?", "전공역량점수"), ("코딩역량인증제 시험은 어떤 언어로 봐?", "Python"),
+             ("TOPCIT 응시하면 뭐 줘?", "마일리지"), ("비교과자율활동 점수는 어떻게 받아?", "다문화"),
+             ("다면적졸업인증만 채우면 졸업 가능해?", "졸업학점"), ("ASP가 뭐야?", "After School"),
+             ("컴소 25학번 학과 MT 회당 몇 점?", "회당 2점")]
+    for q, key in cases:
+        for d, y in [("AI·빅데이터학과", 2022), (None, None)]:
+            assert any(key in c.text for c, _ in r.search(q, 5, d, y)), (q, d)
+
+
 # ---------------------------------------------------------------- LLM tool-calling 루프 (가짜 클라이언트)
 class FakeClient:
     """1턴: get_requirements → 2턴: check_graduation → 3턴: 최종 답변"""

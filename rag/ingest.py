@@ -156,7 +156,16 @@ def read_document(path: Path) -> list[tuple[str, str]]:
     if ext == ".pdf":
         from pypdf import PdfReader
         return [(f"p.{i + 1}", p.extract_text() or "") for i, p in enumerate(PdfReader(str(path)).pages)]
-    if ext in {".txt", ".md"}:
+    if ext == ".md":   # 마크다운은 '## 제목' 단위로 나눠서 표·목록이 잘리지 않게
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        parts = re.split(r"\n(?=## )", text)
+        title = parts[0].strip().splitlines()[0].lstrip("# ").strip() if parts else path.stem
+        out = []
+        for sec in parts[1:] or parts:
+            head = sec.strip().splitlines()[0].lstrip("# ").strip()
+            out.append((head, f"[{title}]\n{sec.strip()}"))
+        return out
+    if ext == ".txt":
         return [("본문", path.read_text(encoding="utf-8", errors="ignore"))]
     if ext == ".docx":
         try:
@@ -179,9 +188,10 @@ def document_chunks(docs_dir: Path = DOCS_DIR) -> list[Chunk]:
         if path.suffix.lower() not in SUPPORTED or path.name.startswith((".", "_")):  # _README 등 안내 파일 제외
             continue
         for loc, text in read_document(path):
-            for j, piece in enumerate(_split(text)):
+            for j, piece in enumerate(_split(text, size=1800 if path.suffix.lower() == ".md" else 700)):
+                dept = _guess_dept(piece) if path.suffix.lower() == ".pdf" else ""  # 일반 안내 문서는 전 학과 공통
                 out.append(Chunk(_cid(path.name, loc, j, piece[:50]), piece, path.name,
-                                 f"{loc}" + (f" #{j + 1}" if j else ""), _guess_dept(piece)))
+                                 f"{loc}" + (f" #{j + 1}" if j else ""), dept))
     return out
 
 

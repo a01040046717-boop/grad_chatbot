@@ -71,7 +71,7 @@ def build_demo(default_dept: str = "AI·빅데이터학과", default_year: int =
                 send = gr.Button("보내기", variant="primary")
                 clear = gr.Button("대화 초기화")
             gr.Examples(["내 학번 졸업인증 기준 전체 알려줘", "학과활동은 몇 번 참여해야 해?",
-                         "권장 자격증은 뭐가 있어?", "비교과 이수내역은 어디서 확인해?",
+                         "권장 자격증은 뭐가 있어?", "AI·SW전공역량졸업인증제 200점은 어떻게 채워?",
                          "인간사랑, 현대기본영어, 봉사학습, 예비창업설계 들었고 학과활동 3번, SQLD 땄어. 졸업 가능해?"],
                         inputs=msg)
 

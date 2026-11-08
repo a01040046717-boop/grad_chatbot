@@ -494,15 +494,19 @@ function keyLines(q, hits, n = 5) {
   const strip = q.replace(/(\d{2,4})\s*학번/g, "");
   const qv = INDEX.vec(charWbNgrams(strip));
   const cand = [];
-  const pool = [...hits.map((h) => h.chunk).filter((c) => !c.location.startsWith("p.")), META_CHUNK].filter(Boolean);
+  // 줄 단위 추출은 학과 기준표(구조화)와 일반 안내에서만. 공식안내 문서(.md)는 섹션 통째로 보여준다
+  const pool = [...hits.map((h) => h.chunk).filter((c) => !c.location.startsWith("p.") && !c.source.endsWith(".md")), META_CHUNK].filter(Boolean);
   for (const c of pool) for (const line of c.text.split("\n")) {
-    const t = line.replace(/^-\s*/, "").trim(); if (t.length < 4) continue;
+    const t = line.replace(/^-\s*/, "").trim();
+    if (t.length < 4 || /^(#|\[.*\]$|출처|\|[\s:|-]+\|$)/.test(t)) continue;   // 제목·출처·표 구분선 제외
     const lv = INDEX.vec(charWbNgrams(t)); let s = 0;
     for (const [g, w] of qv) { const x = lv.get(g); if (x) s += x * w; }
     cand.push({ t, s, loc: c.location });
   }
   const seen = new Set();
-  return cand.sort((a, b) => b.s - a.s).filter((x) => x.s > 0.12 && !seen.has(x.t) && seen.add(x.t)).slice(0, n);
+  cand.sort((a, b) => b.s - a.s);
+  const cut = Math.max(0.05, (cand[0]?.s || 0) * 0.6);   // 가장 관련 높은 줄 대비 상대 기준
+  return cand.filter((x) => x.s >= cut && !seen.has(x.t) && seen.add(x.t)).slice(0, n);
 }
 
 function offlineAnswer(q, hits) {
@@ -513,7 +517,17 @@ function offlineAnswer(q, hits) {
   else if (wantsCheck) parts.push("졸업 가능 여부는 **졸업 자가진단** 탭에서 과목과 활동을 입력하면 바로 계산돼요.");
   const wantsAll = /전체|기준|요건|알려/.test(q) && !/몇|어디|뭐|무엇/.test(q);
   const lines = keyLines(q, hits, wantsAll ? 0 : 5);
-  if (lines.length) {
+  // 공식안내 문서(.md) 섹션이 상위에 걸리면 그 섹션 전체(표 포함)를 보여준다
+  const isMd = (loc) => hits.some((h) => h.chunk.location === loc && h.chunk.source.endsWith(".md"));
+  const topScore = Math.max(...hits.map((h) => h.score));
+  const mdHit = hits.find((h) => h.chunk.source.endsWith(".md") && h.score >= 0.6 * topScore);
+  if (mdHit) {
+    const sec = mdHit.chunk;
+    const other = lines.filter((l) => !isMd(l.loc)).slice(0, 2);
+    if (other.length) parts.push(`**${state.dept} ${state.year}학번 기준표**\n` + other.map((l) => `- ${l.t} <<${l.loc}>>`).join("\n"));
+    const body = sec.text.split("\n").filter((l) => !/^\[.*\]$/.test(l.trim()) && !/^##\s/.test(l)).join("\n");
+    parts.push(`**${sec.location}** <<${sec.source.replace(/\.md$/, "")}>>\n\n${body}`);
+  } else if (lines.length) {
     parts.push(`**${state.dept} ${state.year}학번 기준으로 안내문에서 찾은 내용이에요.**`);
     parts.push(lines.map((l) => `- ${l.t} <<${l.loc}>>`).join("\n"));
   } else {
@@ -558,7 +572,7 @@ async function ask(q) {
 
 $("#ask-form").addEventListener("submit", (e) => { e.preventDefault(); ask($("#q").value); });
 $("#q").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); ask($("#q").value); } });
-const EXAMPLES = ["내 학번 졸업인증 기준 전체 알려줘", "학과활동은 몇 번 참여해야 해?", "권장 자격증은 뭐가 있어?", "비교과 이수내역은 어디서 확인해?",
+const EXAMPLES = ["내 학번 졸업인증 기준 전체 알려줘", "학과활동은 몇 번 참여해야 해?", "권장 자격증은 뭐가 있어?", "비교과 이수내역은 어디서 확인해?", "AI·SW전공역량졸업인증제 200점은 어떻게 채워?",
   "인간사랑, 현대기본영어, 봉사학습, 예비창업설계 들었고 학과활동 3번, SQLD 땄어. 졸업 가능해?"];
 $("#examples").innerHTML = EXAMPLES.map((x) => `<button type="button">${esc(x)}</button>`).join("");
 $("#examples").addEventListener("click", (e) => { if (e.target.tagName === "BUTTON") ask(e.target.textContent); });
