@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SW융합대학 졸업요건 챗봇</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* 학사 행정 도구: 차분한 남색 바탕 + 졸업 인증 '도장' 같은 주홍 포인트. 좌측 작업영역 / 우측 기준·결과 패널 */
+:root {
+  --bg: #f3f4f7;
+  --surface: #ffffff;
+  --ink: #18213a;
+  --muted: #5d6680;
+  --line: #dbe0ea;
+  --accent: #1f4fb8;
+  --accent-soft: #e6edfb;
+  --stamp: #d2512c;
+  --ok: #1f8a5b; --ok-soft: #e3f4ec;
+  --bad: #c2372b; --bad-soft: #fbe9e7;
+  --warn: #a8690b; --warn-soft: #fbf1df;
+  --font-display: "IBM Plex Sans KR", "Noto Sans KR", system-ui, sans-serif;
+  --font-body: "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --radius: 10px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11151f; --surface: #1a2030; --ink: #e8ebf3; --muted: #9aa3ba; --line: #2c3448;
+    --accent: #7ea2f2; --accent-soft: #1f2b47; --stamp: #f08463;
+    --ok: #5fcf98; --ok-soft: #173327; --bad: #f28b80; --bad-soft: #3a1d1b; --warn: #e8b45a; --warn-soft: #362a14;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11151f; --surface: #1a2030; --ink: #e8ebf3; --muted: #9aa3ba; --line: #2c3448;
+  --accent: #7ea2f2; --accent-soft: #1f2b47; --stamp: #f08463;
+  --ok: #5fcf98; --ok-soft: #173327; --bad: #f28b80; --bad-soft: #3a1d1b; --warn: #e8b45a; --warn-soft: #362a14;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 15px/1.6 var(--font-body); }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; margin: 0; }
+
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 20px; }
+header.top { background: var(--surface); border-bottom: 1px solid var(--line); }
+.top-inner { display: flex; flex-wrap: wrap; gap: 16px 28px; align-items: center; justify-content: space-between; padding: 18px 0 0; }
+.brand h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
+.brand p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+.brand .seal { display: inline-block; border: 2px solid var(--stamp); color: var(--stamp); border-radius: 6px; padding: 0 6px; font-size: 12px; font-weight: 700; margin-right: 8px; transform: rotate(-3deg); vertical-align: 3px; }
+.profile { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
+.field { display: grid; gap: 4px; }
+.field label { font-size: 12px; color: var(--muted); font-weight: 500; }
+select, input[type="number"], textarea, input[type="text"] { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+select { padding-right: 28px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; border-radius: 999px; padding: 4px 10px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.chip.on { color: var(--ok); border-color: var(--ok); } .chip.on .dot { background: var(--ok); }
+.chip.off { color: var(--warn); border-color: var(--warn); } .chip.off .dot { background: var(--warn); }
+nav.tabs { display: flex; gap: 4px; margin-top: 14px; }
+nav.tabs a { padding: 10px 16px; text-decoration: none; color: var(--muted); font-weight: 500; border-bottom: 3px solid transparent; }
+nav.tabs a[aria-current="page"] { color: var(--accent); border-color: var(--accent); }
+
+main { padding: 22px 0 40px; }
+.grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 20px; align-items: start; }
+@media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.panel-h { padding: 14px 16px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.panel-h h2 { font-size: 16px; }
+.panel-b { padding: 14px 16px; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+aside.sticky { position: sticky; top: 12px; }
+
+/* chat */
+.chat { display: flex; flex-direction: column; min-height: 560px; }
+.msgs { flex: 1; padding: 16px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; max-height: 64vh; }
+.msg { max-width: 88%; padding: 10px 14px; border-radius: 12px; overflow-wrap: anywhere; }
+.msg.user { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
+.msg.bot { align-self: flex-start; background: var(--bg); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+.msg p { margin: 0 0 8px; } .msg p:last-child { margin-bottom: 0; }
+.msg ul, .msg ol { margin: 4px 0 8px; padding-left: 20px; }
+.msg h3, .msg h4 { font-size: 15px; margin: 8px 0 4px; }
+.msg table { border-collapse: collapse; font-size: 13px; margin: 6px 0; display: block; overflow-x: auto; }
+.msg th, .msg td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; }
+.msg code { background: var(--accent-soft); padding: 1px 4px; border-radius: 4px; font-size: 13px; }
+.msg pre { white-space: pre-wrap; background: var(--surface); border: 1px solid var(--line); padding: 8px; border-radius: 6px; font-size: 12.5px; margin: 6px 0; }
+.cite { display: inline-block; font-size: 11px; font-weight: 700; color: var(--accent); background: var(--accent-soft); border-radius: 4px; padding: 0 5px; }
+.meta { margin-top: 8px; font-size: 12px; color: var(--muted); border-top: 1px dashed var(--line); padding-top: 6px; }
+.meta details summary { cursor: pointer; }
+.meta li { margin: 2px 0; }
+.thinking { color: var(--muted); font-style: italic; }
+.composer { border-top: 1px solid var(--line); padding: 12px; display: grid; gap: 10px; }
+.examples { display: flex; flex-wrap: wrap; gap: 6px; }
+.examples button { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 5px 11px; font-size: 13px; cursor: pointer; color: var(--muted); }
+.examples button:hover { border-color: var(--accent); color: var(--accent); }
+.composer form { display: flex; gap: 8px; }
+.composer textarea { flex: 1; resize: none; min-height: 46px; }
+.btn { border: 0; border-radius: 8px; padding: 10px 16px; font-weight: 700; cursor: pointer; background: var(--accent); color: #fff; }
+.btn:disabled { opacity: .5; cursor: default; }
+.btn.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); font-weight: 500; }
+
+/* requirement summary */
+.total { display: flex; align-items: baseline; gap: 8px; }
+.total b { font: 700 34px/1 var(--font-display); font-variant-numeric: tabular-nums; }
+.kinds { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 12px 0 4px; }
+.kinds div { background: var(--bg); border-radius: 8px; padding: 6px 8px; font-size: 12px; color: var(--muted); }
+.kinds strong { display: block; color: var(--ink); font-size: 16px; font-variant-numeric: tabular-nums; }
+.req-group h3 { font-size: 13px; color: var(--muted); margin: 14px 0 6px; font-weight: 600; }
+.req-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13.5px; }
+.req-list li { display: flex; justify-content: space-between; gap: 10px; }
+.req-list .pt { font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+
+/* checker */
+.check-grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 20px; align-items: start; }
+@media (max-width: 900px) { .check-grid { grid-template-columns: 1fr; } }
+.course-box textarea { width: 100%; min-height: 150px; resize: vertical; }
+.parsed { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.tag { font-size: 12px; background: var(--accent-soft); color: var(--accent); border-radius: 4px; padding: 1px 6px; }
+.kind-block { border-top: 1px solid var(--line); }
+.kind-block > h3 { font-size: 14px; padding: 12px 16px 4px; display: flex; justify-content: space-between; }
+.item { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; padding: 8px 16px; align-items: center; border-left: 3px solid transparent; }
+.item.done { border-left-color: var(--ok); }
+.item .name { font-size: 14px; }
+.item .hint { grid-column: 1 / -1; font-size: 12px; color: var(--muted); margin-top: -4px; }
+.item .ctrl { display: flex; gap: 8px; align-items: center; justify-content: end; flex-wrap: wrap; }
+.item input[type="number"] { width: 76px; text-align: right; }
+.item label.cb { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; cursor: pointer; }
+.item input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); }
+.subs { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 2px 0 2px 10px; border-left: 2px solid var(--line); }
+.subs label { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
+.subs input[type="number"] { width: 64px; }
+.score { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); background: var(--bg); border-radius: 999px; padding: 1px 8px; margin-left: 4px; white-space: nowrap; }
+.score.part { color: var(--warn); background: var(--warn-soft); }
+.score.full { color: var(--ok); background: var(--ok-soft); }
+.auto { font-size: 12px; color: var(--ok); font-weight: 500; }
+.verdict { display: flex; align-items: center; gap: 12px; }
+.stamp { font: 700 15px/1 var(--font-display); border: 3px solid currentColor; border-radius: 8px; padding: 8px 10px; transform: rotate(-4deg); }
+.stamp.pass { color: var(--ok); } .stamp.fail { color: var(--bad); }
+.bars { display: grid; gap: 8px; margin: 14px 0; }
+.bar { font-size: 12.5px; }
+.bar .lab { display: flex; justify-content: space-between; color: var(--muted); font-variant-numeric: tabular-nums; }
+.bar .track { height: 8px; background: var(--bg); border-radius: 4px; overflow: hidden; margin-top: 3px; }
+.bar .fill { height: 100%; background: var(--accent); }
+.bar.full .fill { background: var(--ok); }
+.missing { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.missing li { background: var(--bad-soft); border-radius: 8px; padding: 7px 10px; font-size: 13px; }
+.missing li b { color: var(--bad); font-variant-numeric: tabular-nums; }
+.missing .d { display: block; color: var(--muted); font-size: 12px; }
+.note { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
+.warnbox { background: var(--warn-soft); color: var(--warn); border-radius: 8px; padding: 8px 10px; font-size: 13px; margin: 0 16px 10px; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+footer { color: var(--muted); font-size: 12px; padding: 16px 0 30px; border-top: 1px solid var(--line); }
+footer a { color: var(--accent); }
+[hidden] { display: none !important; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <div class="top-inner">
+      <div class="brand">
+        <h1><span class="seal">인증</span>SW융합대학 졸업요건 챗봇</h1>
+        <p>2026 학과별 다면적 졸업인증제 안내문 기반 RAG 질의응답 · 졸업 자가진단</p>
+      </div>
+      <div class="profile">
+        <div class="field"><label for="dept">학과</label><select id="dept"></select></div>
+        <div class="field"><label for="year">학번</label><select id="year"></select></div>
+        <span id="mode" class="chip"><span class="dot"></span>AI 연결 확인 중</span>
+      </div>
+    </div>
+    <nav class="tabs" aria-label="화면 전환">
+      <a href="#chat" id="tab-chat">질문하기</a>
+      <a href="#check" id="tab-check">졸업 자가진단</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <!-- ============ 질문하기 ============ -->
+  <section id="view-chat" class="grid">
+    <div class="panel chat">
+      <div class="msgs" id="msgs" aria-live="polite"></div>
+      <div class="composer">
+        <div class="examples" id="examples"></div>
+        <form id="ask-form">
+          <textarea id="q" rows="2" placeholder="예) 학과활동은 몇 번 해야 해? / 인간사랑, 예비창업설계 들었는데 졸업 가능해?" aria-label="질문"></textarea>
+          <button class="btn" id="send" type="submit">보내기</button>
+        </form>
+      </div>
+    </div>
+    <aside class="panel sticky" id="req-panel"></aside>
+  </section>
+
+  <!-- ============ 자가진단 ============ -->
+  <section id="view-check" class="check-grid" hidden>
+    <div class="panel">
+      <div class="panel-h"><h2>수강한 교과목</h2><span class="muted small">성적표를 그대로 붙여넣어도 됩니다</span></div>
+      <div class="panel-b course-box">
+        <label for="courses" class="small muted">한 줄에 한 과목 (쉼표 구분도 가능). 학점·성적 표시는 자동으로 제거됩니다.</label>
+        <textarea id="courses" placeholder="인간사랑 A+&#10;현대기본영어(2학점) B+&#10;봉사학습&#10;예비창업설계"></textarea>
+        <div class="parsed" id="parsed"></div>
+      </div>
+      <div class="panel-h" style="border-top:1px solid var(--line)"><h2>비교과 활동 · 이수 항목</h2><button class="btn ghost" id="reset" type="button">입력 초기화</button></div>
+      <div id="form"></div>
+    </div>
+    <aside class="panel sticky" id="result"></aside>
+  </section>
+</main>
+
+<footer class="wrap">
+  공식 이수내역은 <a href="https://st.sch.ac.kr">차세대 종합정보시스템</a> → 학부학사행정 → 졸업 → 개인별졸업진도관리 → 비교과일람표에서 확인하세요.
+  문의: 多Dream비교과센터 (향설 1관 RC306호). 이 페이지는 안내문을 바탕으로 한 자가진단 도구이며 공식 판정이 아닙니다.
+</footer>
+
+<script type="application/json" id="req-data">/*REQ*/</script>
+<script type="application/json" id="chunk-data">/*CHUNKS*/</script>
+<script>
+/*CORE*/
+</script>
+<script>
+const REQ = JSON.parse(document.getElementById("req-data").textContent);
+const INDEX = buildIndex(JSON.parse(document.getElementById("chunk-data").textContent));
+const DEPTS = Object.keys(REQ.departments);
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = (n) => (Math.round(n * 100) / 100).toString();
+
+const store = { get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
+                set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
+
+const state = {
+  dept: store.get("grad.dept", "AI·빅데이터학과"),
+  year: store.get("grad.year", 2022),
+  history: [],          // [{role, content}]
+  acts: {}, touched: false, lastCheck: null,
+  busy: false,
+};
+if (!DEPTS.includes(state.dept)) state.dept = "AI·빅데이터학과";
+
+/* ---------------- 프로필 ---------------- */
+function yearsFor(dept) {
+  const ys = [];
+  for (const t of REQ.departments[dept].tracks) for (let y = t.years[0]; y <= t.years[1]; y++) ys.push(y);
+  return ys;
+}
+function fillProfile() {
+  $("#dept").innerHTML = DEPTS.map((d) => `<option ${d === state.dept ? "selected" : ""}>${esc(d)}</option>`).join("");
+  const ys = yearsFor(state.dept);
+  if (!ys.includes(state.year)) state.year = ys.includes(2022) ? 2022 : ys[ys.length - 1];
+  $("#year").innerHTML = ys.map((y) => `<option value="${y}" ${y === state.year ? "selected" : ""}>${y}학번 (${String(y).slice(2)}학번)</option>`).join("");
+}
+$("#dept").addEventListener("change", (e) => { state.dept = e.target.value; onProfile(); });
+$("#year").addEventListener("change", (e) => { state.year = +e.target.value; onProfile(); });
+function onProfile() {
+  fillProfile(); store.set("grad.dept", state.dept); store.set("grad.year", state.year);
+  state.acts = {}; state.touched = false; state.lastCheck = null;
+  renderReqPanel(); renderForm(); recompute();
+}
+
+/* ---------------- 탭 ---------------- */
+function route() {
+  const v = location.hash === "#check" ? "check" : "chat";
+  $("#view-chat").hidden = v !== "chat"; $("#view-check").hidden = v !== "check";
+  $("#tab-chat").toggleAttribute("aria-current", v === "chat"); $("#tab-check").toggleAttribute("aria-current", v === "check");
+  if (v === "chat") $("#tab-chat").setAttribute("aria-current", "page"); else $("#tab-check").setAttribute("aria-current", "page");
+}
+window.addEventListener("hashchange", route);
+
+/* ---------------- 적용 기준 패널 ---------------- */
+function renderReqPanel() {
+  const s = getRequirementItems(state.dept, state.year, REQ);
+  if (s.error) { $("#req-panel").innerHTML = `<div class="panel-b">${esc(s.error)}</div>`; return; }
+  const groups = KINDS.map((k) => {
+    const its = s.items.filter((i) => i.kind === k); if (!its.length) return "";
+    return `<div class="req-group"><h3>${k} · ${s.subtotals[k]}점</h3><ul class="req-list">${its.map((i) =>
+      `<li><span>${esc(i.name)}</span><span class="pt">${i.type === "count" ? `회당 ${i.per} · ` : ""}${fmt(i.points)}점</span></li>`).join("")}</ul></div>`;
+  }).join("");
+  $("#req-panel").innerHTML = `
+    <div class="panel-h"><h2>내 졸업인증 기준</h2><span class="muted small">${esc(s.department)} ${s.year}학번</span></div>
+    <div class="panel-b">
+      <div class="total"><b>${s.total}</b><span class="muted">점 필요</span></div>
+      <div class="kinds">${KINDS.map((k) => `<div>${k}<strong>${s.subtotals[k]}</strong></div>`).join("")}</div>
+      ${groups}
+      ${s.unitRules ? `<p class="note">점수 산정: ${esc(s.unitRules)}</p>` : ""}
+      ${s.notes.map((n) => `<p class="note">※ ${esc(n)}</p>`).join("")}
+      ${s.warnings.map((n) => `<p class="note">⚠ ${esc(n)}</p>`).join("")}
+    </div>`;
+}
+
+/* ---------------- 자가진단 폼 ---------------- */
+function renderForm() {
+  const s = getRequirementItems(state.dept, state.year, REQ);
+  if (s.error) { $("#form").innerHTML = `<div class="panel-b">${esc(s.error)}</div>`; return; }
+  const html = [];
+  if (s.warnings.length) html.push(`<div class="warnbox">${s.warnings.map(esc).join("<br>")}</div>`);
+  for (const k of KINDS) {
+    const its = s.items.filter((i) => i.kind === k); if (!its.length) continue;
+    html.push(`<div class="kind-block"><h3><span>${k}</span><span class="muted small">${s.subtotals[k]}점</span></h3>`);
+    for (const it of its) {
+      const id = `f-${it.id}`;
+      let ctrl = "", extra = "", hint = it.note || "";
+      if (it.type === "course") { ctrl = `<span class="auto" id="${id}-auto" hidden>수강 리스트에서 확인</span><label class="cb"><input type="checkbox" id="${id}" data-id="${it.id}" data-t="bool">이수</label>`; hint = hint || "수강 리스트에 있으면 자동 인정, 이름이 다르면 직접 체크"; }
+      else if (it.type === "check") ctrl = `<label class="cb"><input type="checkbox" id="${id}" data-id="${it.id}" data-t="bool">이수/참여</label>`;
+      else if (it.type === "all_of") ctrl = it.parts.map((pt, j) => `<label class="cb"><input type="checkbox" id="${id}-p${j}" data-id="${it.id}" data-t="part" value="${esc(pt)}">${esc(pt)}</label>`).join("");
+      else if (it.type === "count") { ctrl = `<input type="number" min="0" max="99" value="0" id="${id}" data-id="${it.id}" data-t="int" aria-label="${esc(it.name)} 횟수"><span class="small muted">회</span>`; hint = `회당 ${it.per}점 · ${Math.ceil(it.points / it.per)}회 필요`; }
+      else if (it.type === "choose") {
+        const opts = [...(it.options || []), ...(it.substitutes || [])];
+        hint = opts.length ? `${it.n}과목 필요 · 수강 리스트에 없으면 아래에서 선택` : `수강 리스트에서 '${it.pattern}'이 들어간 과목을 셉니다 · ${it.n}과목 필요`;
+        if (opts.length) extra = `<div class="subs">${opts.map((o, j) => `<label><input type="checkbox" id="${id}-${j}" data-id="${it.id}" data-t="list" value="${esc(o)}">${esc(o)}</label>`).join("")}</div>`;
+      } else if (it.type === "points" && !(it.subitems || []).length) {
+        ctrl = `<input type="number" min="0" max="${it.points}" step="0.5" value="0" id="${id}-other" data-id="${it.id}" data-t="other" aria-label="${esc(it.name)} 취득 점수"><span class="small muted">점</span>`;
+        hint = it.note || "비교과일람표에 인정된 취득 점수를 입력하세요";
+      } else if (it.type === "points") {
+        hint = it.note || "해당하는 세부 활동을 입력하면 점수가 합산됩니다";
+        extra = `<div class="subs">${(it.subitems || []).map((sb, j) => {
+          const sid = `${id}-s${j}`;
+          if (sb.mode === "select") return `<label>${esc(sb.name)} <select id="${sid}" data-id="${it.id}" data-t="sub" data-sub="${esc(sb.name)}">${Object.entries(sb.options).map(([k, v]) => `<option value="${esc(k)}">${esc(k)}${v ? ` (+${v})` : ""}</option>`).join("")}</select></label>`;
+          if (sb.mode === "check") return `<label><input type="checkbox" id="${sid}" data-id="${it.id}" data-t="sub" data-sub="${esc(sb.name)}">${esc(sb.name)} (+${sb.points})</label>`;
+          if (sb.mode === "count") return `<label>${esc(sb.name)} <input type="number" min="0" value="0" id="${sid}" data-id="${it.id}" data-t="sub" data-sub="${esc(sb.name)}"> × ${sb.per}점</label>`;
+          return `<label>${esc(sb.name)} <input type="number" min="0" value="0" id="${sid}" data-id="${it.id}" data-t="sub" data-sub="${esc(sb.name)}"></label>`;
+        }).join("")}<label>기타 인정 점수 <input type="number" min="0" value="0" id="${id}-other" data-id="${it.id}" data-t="other"></label></div>`;
+      } else if (it.type === "topcit_rule") {
+        ctrl = `<label class="small">응시 <input type="number" min="0" value="0" id="${id}-att" data-id="${it.id}" data-t="att">회</label>
+                <label class="small">최고 수준 <select id="${id}-lv" data-id="${it.id}" data-t="lv">${[0, 1, 2, 3, 4, 5].map((l) => `<option value="${l}">Lv${l}</option>`).join("")}</select></label>`;
+        hint = "응시 5회 / 응시 3회+Lv2 / 응시 1회+Lv3 / Lv4 중 하나";
+      }
+      html.push(`<div class="item" id="row-${it.id}"><span class="name">${esc(it.name)} <span class="score" id="sc-${it.id}">0 / ${fmt(it.points)}점</span></span><span class="ctrl">${ctrl}</span>${hint ? `<span class="hint">${esc(hint)}</span>` : ""}${extra}</div>`);
+    }
+    html.push(`</div>`);
+  }
+  $("#form").innerHTML = html.join("");
+}
+
+function collectActs() {
+  const acts = {};
+  document.querySelectorAll("#form [data-id]").forEach((el) => {
+    const id = el.dataset.id, t = el.dataset.t;
+    if (t === "bool") acts[id] = el.checked;
+    else if (t === "int") acts[id] = +el.value || 0;
+    else if (t === "list" || t === "part") { acts[id] = acts[id] || []; if (el.checked) acts[id].push(el.value); }
+    else if (t === "sub") { acts[id] = acts[id] || { subitems: {}, other: 0 }; acts[id].subitems[el.dataset.sub] = el.type === "checkbox" ? el.checked : el.tagName === "SELECT" ? el.value : +el.value || 0; }
+    else if (t === "other") { acts[id] = acts[id] || { subitems: {}, other: 0 }; acts[id].other = +el.value || 0; }
+    else if (t === "att") { acts[id] = acts[id] || {}; acts[id].attempts = +el.value || 0; }
+    else if (t === "lv") { acts[id] = acts[id] || {}; acts[id].level = +el.value || 0; }
+  });
+  return acts;
+}
+
+function recompute() {
+  const courses = $("#courses").value;
+  const parsed = parseCourseList(courses);
+  $("#parsed").innerHTML = parsed.length ? `<span class="small muted">인식된 과목:</span>` + parsed.map((c) => `<span class="tag">${esc(c)}</span>`).join("") : "";
+  const r = checkGraduation(state.dept, state.year, courses, collectActs(), REQ);
+  state.lastCheck = r;
+  if (r.error) { $("#result").innerHTML = `<div class="panel-b">${esc(r.error)}</div>`; return; }
+  for (const it of r.items) {
+    const row = document.getElementById(`row-${it.id}`); if (row) row.classList.toggle("done", it.passed);
+    const sc = document.getElementById(`sc-${it.id}`);
+    if (sc) { sc.textContent = `${fmt(it.earned)} / ${fmt(it.required)}점`; sc.className = "score " + (it.passed ? "full" : it.earned > 0 ? "part" : ""); }
+    const auto = document.getElementById(`f-${it.id}-auto`);
+    if (auto) {
+      const isAuto = it.detail === "수강 리스트에서 확인";
+      const cb = document.getElementById(`f-${it.id}`);
+      auto.hidden = !isAuto;
+      if (isAuto) { cb.checked = true; cb.disabled = true; cb.dataset.auto = "1"; }
+      else if (cb.dataset.auto) { cb.checked = false; cb.disabled = false; delete cb.dataset.auto; }
+    }
+  }
+  $("#result").innerHTML = `
+    <div class="panel-h"><h2>판정 결과</h2><span class="muted small">${esc(r.department)} ${r.year}학번</span></div>
+    <div class="panel-b">
+      <div class="verdict"><div class="total"><b>${fmt(r.totalEarned)}</b><span class="muted">/ ${fmt(r.totalRequired)}점</span></div>
+        <span class="stamp ${r.passed ? "pass" : "fail"}">${r.passed ? "졸업인증 충족" : "미충족"}</span></div>
+      <div class="bars">${KINDS.map((k) => { const v = r.byKind[k], p = v.required ? Math.min(100, (v.earned / v.required) * 100) : 100;
+        return `<div class="bar ${p >= 100 ? "full" : ""}"><div class="lab"><span>${k}</span><span>${fmt(v.earned)} / ${fmt(v.required)}</span></div><div class="track"><div class="fill" style="width:${p}%"></div></div></div>`; }).join("")}</div>
+      ${r.missing.length ? `<h3 class="small" style="margin:0 0 6px">부족한 항목 ${r.missing.length}개</h3><ul class="missing">${r.missing.map((m) =>
+        `<li>${esc(m.name)} <b>−${fmt(m.need)}점</b><span class="d">${esc(m.kind)} · ${esc(m.detail)}</span></li>`).join("")}</ul>` : `<p>모든 항목을 채웠습니다. 비교과일람표에서 공식 이수내역을 확인하세요.</p>`}
+      ${r.unmatchedCourses.length ? `<p class="note">졸업인증 항목과 관계없는 과목: ${r.unmatchedCourses.map(esc).join(", ")}</p>` : ""}
+      <div class="actions"><button class="btn" id="ask-missing" type="button">부족한 부분 챗봇에게 묻기</button></div>
+    </div>`;
+  $("#ask-missing").onclick = () => { state.touched = true; location.hash = "#chat"; ask("자가진단 결과에서 부족한 항목을 어떻게 채우면 되는지 우선순위대로 알려줘."); };
+}
+$("#courses").addEventListener("input", () => { state.touched = true; store.set("grad.courses", $("#courses").value); recompute(); });
+$("#form").addEventListener("input", () => { state.touched = true; recompute(); });
+$("#form").addEventListener("change", () => { state.touched = true; recompute(); });
+$("#reset").addEventListener("click", () => { $("#courses").value = ""; store.set("grad.courses", ""); renderForm(); state.touched = false; recompute(); });
+
+/* ---------------- 마크다운 (간단) ---------------- */
+function inline(s) {
+  return esc(s).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\[문서\s*(\d+)\]/g, '<span class="cite">문서 $1</span>')
+    .replace(/&lt;&lt;(.+?)&gt;&gt;/g, '<span class="cite">$1</span>')
+    .replace(/(^|\s)_(.+?)_(?=\s|$)/g, '$1<em class="muted">$2</em>');
+}
+function md(src) {
+  const lines = String(src).replace(/\r/g, "").split("\n"); const out = []; let i = 0;
+  while (i < lines.length) {
+    const l = lines[i];
+    if (/^```/.test(l)) { const buf = []; i++; while (i < lines.length && !/^```/.test(lines[i])) buf.push(lines[i++]); i++; out.push(`<pre>${esc(buf.join("\n"))}</pre>`); continue; }
+    if (/^\s*\|/.test(l)) { const rows = []; while (i < lines.length && /^\s*\|/.test(lines[i])) rows.push(lines[i++]);
+      const cells = (r) => r.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+      const body = rows.filter((r) => !/^\s*\|[\s:|-]+\|\s*$/.test(r));
+      out.push(`<table>${body.map((r, j) => `<tr>${cells(r).map((c) => j === 0 ? `<th>${inline(c)}</th>` : `<td>${inline(c)}</td>`).join("")}</tr>`).join("")}</table>`); continue; }
+    if (/^#{1,4}\s/.test(l)) { out.push(`<h4>${inline(l.replace(/^#+\s/, ""))}</h4>`); i++; continue; }
+    if (/^\s*([-*•]|\d+[.)])\s+/.test(l)) { const ordered = /^\s*\d/.test(l); const items = [];
+      while (i < lines.length && /^\s*([-*•]|\d+[.)])\s+/.test(lines[i])) items.push(lines[i++].replace(/^\s*([-*•]|\d+[.)])\s+/, ""));
+      out.push(`<${ordered ? "ol" : "ul"}>${items.map((x) => `<li>${inline(x)}</li>`).join("")}</${ordered ? "ol" : "ul"}>`); continue; }
+    if (!l.trim()) { i++; continue; }
+    const para = []; while (i < lines.length && lines[i].trim() && !/^(```|\s*\||#{1,4}\s|\s*([-*•]|\d+[.)])\s+)/.test(lines[i])) para.push(lines[i++]);
+    out.push(`<p>${para.map(inline).join("<br>")}</p>`);
+  }
+  return out.join("");
+}
+
+/* ---------------- 채팅 ---------------- */
+const PROMPT = `너는 순천향대학교 SW융합대학 학생을 돕는 '다면적 졸업인증제 상담 챗봇'이다.
+규칙:
+1. 반드시 [참고 문서]와 도구 결과에 근거해서만 답한다. 문서에 없는 내용은 추측하지 말고 "안내문에 없는 내용"이라고 말한 뒤 多Dream비교과센터(향설 1관 RC306호) 문의를 권한다.
+2. 답변에 사용한 근거는 [문서 n] 형태로 표시한다.
+3. 학과·학번에 따라 기준이 다르다. [학생 프로필]의 학과·학번 기준으로 답한다. 질문에 다른 학과/학번이 나오면 그 기준으로 답한다.
+4. 졸업 충족 여부나 점수 합계는 직접 계산하지 말고 반드시 check_graduation 도구를 사용한다.
+   - 학생이 들은 과목/참여한 활동을 말하면 get_requirements 로 항목 id 를 확인한 뒤 activities 를 채워 check_graduation 을 호출한다.
+   - 과목명은 courses 에 그대로 넣는다. 학생이 언급하지 않은 항목은 미이수로 두고 결과의 부족 항목을 안내한다.
+   - 세부 점수가 있는 항목(points 유형)은 get_requirements 결과의 subitems 이름을 그대로 써서 {"subitems": {"SQL개발자(SQLD) 취득": true}} 처럼 넣는다.
+   - 자기주도상담·학과활동·전공상담 등 횟수형(count)은 참여 횟수를 넣는다 (회당 점수는 도구가 계산).
+5. 결과 설명: 총점/필요점수, 충족 여부, 부족한 항목과 채우는 방법(회당 점수 등)을 간결하게 정리한다.
+6. 공식 확인은 종합정보시스템 → 학부학사행정 → 졸업 → 개인별졸업진도관리 → 비교과일람표 에서 하도록 안내한다.
+7. 한국어로, 친근하지만 정확하고 간결하게 답한다. 표는 꼭 필요할 때만 쓴다.`;
+
+let samplePromise = null;
+function getSample() {
+  if (!samplePromise) samplePromise = (window.claude && typeof window.claude.use === "function")
+    ? window.claude.use("sample").catch(() => null) : Promise.resolve(null);
+  return samplePromise;
+}
+let aiOff = false;
+function setMode(on) {
+  const m = $("#mode");
+  m.className = "chip " + (on ? "on" : "off");
+  m.innerHTML = `<span class="dot"></span>${on ? "AI 답변 사용 가능" : "검색 모드"}`;
+  m.title = on ? "질문하면 Claude가 문서 근거로 답합니다" : "이 화면에서는 AI 답변 대신 안내문 검색으로 답합니다. 검색과 자가진단은 모두 쓸 수 있습니다.";
+}
+
+function addMsg(role, html) {
+  const d = document.createElement("div"); d.className = `msg ${role}`; d.innerHTML = html;
+  $("#msgs").appendChild(d); $("#msgs").scrollTop = $("#msgs").scrollHeight; return d;
+}
+function metaHtml(hits, tools) {
+  const src = hits.length ? `<details><summary>근거 문서 ${hits.length}개</summary><ol>${hits.map((h) =>
+    `<li>${esc(h.chunk.location)} <span class="muted">(${esc(h.chunk.source)})</span></li>`).join("")}</ol></details>` : "";
+  const tl = tools.length ? `<div>도구 호출: ${tools.map((t) => `<code>${esc(t)}</code>`).join(" → ")}</div>` : "";
+  return src || tl ? `<div class="meta">${tl}${src}</div>` : "";
+}
+
+const TOOLS = (sources, trace) => [
+  { name: "search_documents", description: "졸업인증제 안내 문서에서 관련 내용을 검색한다.",
+    inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+    execute: ({ query }) => { trace.push("search_documents"); const h = search(INDEX, query, 4, state.dept, state.year, REQ); h.forEach((x) => sources.push(x)); return formatContext(h); } },
+  { name: "get_requirements", description: "학과·학번에 적용되는 졸업인증 항목 목록(id, 이름, 유형, 배점)을 조회한다. check_graduation 호출 전에 항목 id 확인용.",
+    inputSchema: { type: "object", properties: { department: { type: "string" }, admission_year: { type: "integer" } }, required: ["department", "admission_year"] },
+    execute: ({ department, admission_year }) => { trace.push("get_requirements"); return JSON.stringify(compactRequirements(department, admission_year, REQ)); } },
+  { name: "check_graduation", description: "수강 과목과 비교과 활동으로 다면적 졸업인증 충족 여부를 계산한다. activities 는 {항목id: 값}. course/check=true, count=참여횟수(예: 자기주도상담 3회→3), points=취득점수 또는 {subitems:{세부항목명:값}} (세부 값: check=true, count=횟수, number=점수, select=선택지 이름), choose=[과목명], all_of=[이수한 부분명 예: '1학기','2학기'], topcit_rule={attempts, level}.",
+    inputSchema: { type: "object", properties: { department: { type: "string" }, admission_year: { type: "integer" },
+      courses: { type: "array", items: { type: "string" } }, activities: { type: "object" } }, required: ["department", "admission_year"] },
+    execute: (a) => { trace.push("check_graduation"); return formatResultText(checkGraduation(a.department, a.admission_year, a.courses || [], a.activities || {}, REQ)); } },
+];
+
+/* AI가 없을 때: 검색된 청크에서 질문과 가장 가까운 '줄'만 골라 보여준다 (추출형 답변) */
+const META_CHUNK = INDEX.chunks.find((c) => c.location === "일반 안내");
+function keyLines(q, hits, n = 5) {
+  const strip = q.replace(/(\d{2,4})\s*학번/g, "");
+  const qv = INDEX.vec(charWbNgrams(strip));
+  const cand = [];
+  const pool = [...hits.map((h) => h.chunk).filter((c) => !c.location.startsWith("p.")), META_CHUNK].filter(Boolean);
+  for (const c of pool) for (const line of c.text.split("\n")) {
+    const t = line.replace(/^-\s*/, "").trim(); if (t.length < 4) continue;
+    const lv = INDEX.vec(charWbNgrams(t)); let s = 0;
+    for (const [g, w] of qv) { const x = lv.get(g); if (x) s += x * w; }
+    cand.push({ t, s, loc: c.location });
+  }
+  const seen = new Set();
+  return cand.sort((a, b) => b.s - a.s).filter((x) => x.s > 0.12 && !seen.has(x.t) && seen.add(x.t)).slice(0, n);
+}
+
+function offlineAnswer(q, hits) {
+  const parts = [];
+  const wantsCheck = /졸업\s*가능|충족|부족|남은|모자|채우/.test(q);
+  if (wantsCheck && state.touched && state.lastCheck && !state.lastCheck.error)
+    parts.push(`**자가진단 결과**\n\`\`\`\n${formatResultText(state.lastCheck)}\n\`\`\``);
+  else if (wantsCheck) parts.push("졸업 가능 여부는 **졸업 자가진단** 탭에서 과목과 활동을 입력하면 바로 계산돼요.");
+  const wantsAll = /전체|기준|요건|알려/.test(q) && !/몇|어디|뭐|무엇/.test(q);
+  const lines = keyLines(q, hits, wantsAll ? 0 : 5);
+  if (lines.length) {
+    parts.push(`**${state.dept} ${state.year}학번 기준으로 안내문에서 찾은 내용이에요.**`);
+    parts.push(lines.map((l) => `- ${l.t} <<${l.loc}>>`).join("\n"));
+  } else {
+    const top = hits.find((h) => !h.chunk.location.startsWith("p.")) || hits[0];
+    if (top) parts.push(`**[문서 1] ${top.chunk.location}**\n\`\`\`\n${top.chunk.text.slice(0, 1200)}\n\`\`\``);
+  }
+  parts.push("_검색 모드: 안내문에서 질문과 가장 가까운 내용을 찾아 보여드렸어요._");
+  return parts.join("\n\n");
+}
+
+async function ask(q) {
+  q = q.trim(); if (!q || state.busy) return;
+  state.busy = true; $("#send").disabled = true; $("#q").value = "";
+  addMsg("user", esc(q).replace(/\n/g, "<br>"));
+  const hits = search(INDEX, q, 5, state.dept, state.year, REQ);
+  const bubble = addMsg("bot", `<span class="thinking">문서를 찾는 중…</span>`);
+  const sample = aiOff ? null : await getSample();
+  let text = "", sources = [...hits], trace = [];
+  if (!sample) {
+    setMode(false);
+    text = offlineAnswer(q, hits);
+  } else {
+    const ctx = [`[학생 프로필] 학과: ${state.dept}, 학번: ${state.year}`];
+    if (state.touched && state.lastCheck && !state.lastCheck.error) ctx.push(`[학생이 자가진단 탭에서 입력한 최근 판정 결과]\n${formatResultText(state.lastCheck)}`);
+    const final = `${PROMPT}\n\n${ctx.join("\n\n")}\n\n[참고 문서]\n${formatContext(hits)}\n\n[질문]\n${q}`;
+    const messages = [...state.history.slice(-8), { role: "user", content: final }];
+    try {
+      const res = await sample(messages, { tools: TOOLS(sources, trace), cache: false, modelTier: "default",
+        onText: ({ text: t }) => { bubble.innerHTML = t ? md(t) : `<span class="thinking">답변을 정리하는 중…</span>`; $("#msgs").scrollTop = $("#msgs").scrollHeight; } });
+      text = res.text || "";
+    } catch (e) {
+      if (e && e.code === "not_granted") { aiOff = true; setMode(false); text = offlineAnswer(q, hits); }
+      else if (e && e.code === "rate_limited") text = "질문이 몰려 잠시 답변할 수 없어요. 조금 뒤에 다시 보내 주세요.\n\n" + offlineAnswer(q, hits);
+      else text = (e && e.text) ? e.text : "답변을 만들지 못했어요. 다시 시도해 주세요.\n\n" + offlineAnswer(q, hits);
+    }
+  }
+  const seen = new Set(); sources = sources.filter((h) => { const k = h.chunk.id; if (seen.has(k)) return false; seen.add(k); return true; });
+  bubble.innerHTML = md(text) + metaHtml(sources.slice(0, 6), trace);
+  state.history.push({ role: "user", content: q }, { role: "assistant", content: text });
+  state.busy = false; $("#send").disabled = false; $("#msgs").scrollTop = $("#msgs").scrollHeight;
+}
+
+$("#ask-form").addEventListener("submit", (e) => { e.preventDefault(); ask($("#q").value); });
+$("#q").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); ask($("#q").value); } });
+const EXAMPLES = ["내 학번 졸업인증 기준 전체 알려줘", "학과활동은 몇 번 참여해야 해?", "권장 자격증은 뭐가 있어?", "비교과 이수내역은 어디서 확인해?",
+  "인간사랑, 현대기본영어, 봉사학습, 예비창업설계 들었고 학과활동 3번, SQLD 땄어. 졸업 가능해?"];
+$("#examples").innerHTML = EXAMPLES.map((x) => `<button type="button">${esc(x)}</button>`).join("");
+$("#examples").addEventListener("click", (e) => { if (e.target.tagName === "BUTTON") ask(e.target.textContent); });
+
+function welcome() {
+  const s = getRequirementItems(state.dept, state.year, REQ);
+  addMsg("bot", md(`안녕하세요! **SW융합대학 다면적 졸업인증제** 안내문을 바탕으로 답하는 챗봇이에요.
+위에서 학과와 학번을 고르면 그 기준으로 답합니다. 지금은 **${state.dept} ${state.year}학번**이고, 총 **${s.total ?? "-"}점**이 필요해요.
+- 졸업요건이나 활동 점수가 궁금하면 그대로 물어보세요.
+- 들은 과목과 참여한 활동을 적어 주면 졸업 가능 여부를 계산해 드려요.
+- 체크박스로 하나씩 입력하려면 **졸업 자가진단** 탭을 쓰세요.`));
+}
+
+/* ---------------- 시작 ---------------- */
+fillProfile(); renderReqPanel(); renderForm();
+$("#courses").value = store.get("grad.courses", "");
+recompute(); route(); welcome();
+getSample().then((s) => setMode(!!s));
+</script>
+</body>
+</html>
