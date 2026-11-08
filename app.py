@@ -98,7 +98,9 @@ with tab_check:
         st.error(spec["error"])
     else:
         st.subheader(f"{dept} {year}학번 · 기준 {spec['total']}점")
-        st.caption(" · ".join(f"{k} {v}점" for k, v in spec["subtotals"].items()))
+        st.caption(" / ".join(
+            f"{g} {spec['groups'][g]:g}점 (" + ", ".join(f"{k.split('·')[1]} {v:g}" for k, v in spec["sections"].items()
+                                                  if k.startswith(g)) + ")" for g in ("대학공통", "학과기준")))
         st.caption("인재상별: " + " · ".join(
             f"{c} {sum(i['points'] for i in spec['items'] if i['category'] == c):g}점"
             for c in ["소통하는 공감인재", "융합하는 창의인재", "공헌하는 글로벌인재"]))
@@ -121,11 +123,9 @@ with tab_check:
         activities = {}
         with col_r:
             st.markdown("#### 🏃 비교과 활동 / 이수 항목 체크")
-            for kind in ["대학공통", "교과", "비교과지정", "비교과미지정"]:
-                items = [i for i in spec["items"] if i["kind"] == kind]
-                if not items:
-                    continue
-                with st.expander(f"{kind} ({sum(i['points'] for i in items):g}점)", expanded=True):
+            for sec, sec_pts in spec["sections"].items():
+                items = [i for i in spec["items"] if i["section"] == sec]
+                with st.expander(f"{sec} ({sec_pts:g}점)", expanded=True):
                     for it in items:
                         key = kp + it["id"]
                         label = f"{it['name']} ({it['points']:g}점)"
@@ -195,9 +195,13 @@ with tab_check:
             col_k, col_c = st.columns(2)
             with col_k:
                 st.markdown("**구분별**")
-                for k, v in res.by_kind.items():
-                    ratio = v["earned"] / v["required"] if v["required"] else 1
-                    st.progress(min(ratio, 1.0), text=f"{k}: {v['earned']:g} / {v['required']:g}")
+                for g, gv in res.by_group.items():
+                    ratio = gv["earned"] / gv["required"] if gv["required"] else 1
+                    st.progress(min(ratio, 1.0), text=f"**{g}**: {gv['earned']:g} / {gv['required']:g}")
+                    for k, v in res.by_kind.items():
+                        if k.startswith(g):
+                            r_ = v["earned"] / v["required"] if v["required"] else 1
+                            st.progress(min(r_, 1.0), text=f"　└ {k.split('·')[1]}: {v['earned']:g} / {v['required']:g}")
             with col_c:
                 st.markdown("**인재상별**")
                 for k, v in res.by_category.items():
@@ -207,14 +211,14 @@ with tab_check:
             if res.missing:
                 st.markdown("#### ❗ 부족한 항목")
                 st.dataframe(
-                    [{"구분": m["kind"], "인재상": m["category"], "항목": m["name"],
+                    [{"구분": m["section"], "인재상": m["category"], "항목": m["name"],
                       "부족 점수": m["need"], "현재 상태": m["detail"]} for m in res.missing],
                     use_container_width=True, hide_index=True)
             else:
                 st.balloons()
                 st.success("모든 항목을 충족했습니다! 공식 확인은 종합정보시스템 → 비교과일람표에서 하세요.")
             with st.expander("전체 항목 상세"):
-                st.dataframe([{"구분": i["kind"], "인재상": i["category"], "항목": i["name"], "필요": i["required"], "취득": i["earned"],
+                st.dataframe([{"구분": i["section"], "인재상": i["category"], "항목": i["name"], "필요": i["required"], "취득": i["earned"],
                                "충족": "✅" if i["passed"] else "❌", "근거": i["detail"]} for i in res.items],
                              use_container_width=True, hide_index=True)
             if res.unmatched_courses:

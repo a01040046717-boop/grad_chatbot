@@ -119,7 +119,8 @@ def _compact_requirements(dept: str, year: int) -> dict:
         return spec
     items = []
     for it in spec["items"]:
-        x = {"id": it["id"], "name": it["name"], "kind": it["kind"], "type": it["type"], "points": it["points"]}
+        x = {"id": it["id"], "name": it["name"], "section": it["section"], "category": it["category"],
+             "type": it["type"], "points": it["points"]}
         if it["type"] == "count":
             x["per"] = it["per"]
         if it["type"] == "choose":
@@ -133,7 +134,8 @@ def _compact_requirements(dept: str, year: int) -> dict:
                               **({"per": s["per"]} if "per" in s else {}),
                               **({"options": s["options"]} if "options" in s else {})} for s in it["subitems"]]
         items.append(x)
-    return {"department": d, "year": year, "total": spec["total"], "items": items,
+    return {"department": d, "year": year, "total": spec["total"], "groups": spec["groups"],
+            "sections": spec["sections"], "items": items,
             "unit_rules": spec["unit_rules"], "notes": spec["notes"]}
 
 

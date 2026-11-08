@@ -32,12 +32,14 @@ def _result_markdown(res) -> str:
     head = "## ✅ 졸업인증 충족" if res.passed else "## ❌ 아직 미충족"
     lines = [head, f"**총점 {res.total_earned:g} / {res.total_required:g}점**", "",
              "| 구분 | 취득 | 필요 |", "|---|---|---|"]
-    lines += [f"| {k} | {v['earned']:g} | {v['required']:g} |" for k, v in res.by_kind.items()]
+    for g, gv in res.by_group.items():
+        lines.append(f"| **{g}** | **{gv['earned']:g}** | **{gv['required']:g}** |")
+        lines += [f"| └ {k.split('·')[1]} | {v['earned']:g} | {v['required']:g} |" for k, v in res.by_kind.items() if k.startswith(g)]
     lines += ["", "| 인재상 | 취득 | 필요 |", "|---|---|---|"]
     lines += [f"| {k} | {v['earned']:g} | {v['required']:g} |" for k, v in res.by_category.items()]
     if res.missing:
         lines += ["", "### 부족한 항목", "| 구분 | 인재상 | 항목 | 부족 | 현재 상태 |", "|---|---|---|---|---|"]
-        lines += [f"| {m['kind']} | {m['category']} | {m['name']} | {m['need']:g}점 | {m['detail']} |" for m in res.missing]
+        lines += [f"| {m['section']} | {m['category']} | {m['name']} | {m['need']:g}점 | {m['detail']} |" for m in res.missing]
     if res.unmatched_courses:
         lines += ["", "ℹ️ 졸업인증 항목과 매칭되지 않은 과목: " + ", ".join(res.unmatched_courses)]
     lines += [""] + [f"※ {w}" for w in res.warnings + res.notes]
@@ -115,11 +117,9 @@ def build_demo(default_dept: str = "AI·빅데이터학과", default_year: int =
                             return
                         gr.Markdown(f"### 🏃 {d} {int(y)}학번 · 기준 {spec['total']}점")
                         comps, meta = [], []
-                        for kind in ["대학공통", "교과", "비교과지정", "비교과미지정"]:
-                            items = [i for i in spec["items"] if i["kind"] == kind]
-                            if not items:
-                                continue
-                            gr.Markdown(f"**{kind}** ({sum(i['points'] for i in items):g}점)")
+                        for sec, sec_pts in spec["sections"].items():
+                            items = [i for i in spec["items"] if i["section"] == sec]
+                            gr.Markdown(f"**{sec}** ({sec_pts:g}점)")
                             for it in items:
                                 lab = f"{it['name']} ({it['points']:g}점)"
                                 t = it["type"]

@@ -31,17 +31,17 @@ def interactive_check(dept: str, year: int) -> str:
     for it in spec["items"]:
         t, name = it["type"], f"{it['name']} ({it['points']:g}점)"
         if t == "check":
-            acts[it["id"]] = input(f"[{it['kind']}] {name} 이수/참여? (y/N) ").strip().lower() == "y"
+            acts[it["id"]] = input(f"[{it['section']}] {name} 이수/참여? (y/N) ").strip().lower() == "y"
         elif t == "course" and not any(_norm(m) in parsed for m in it.get("match", [])):
-            acts[it["id"]] = input(f"[{it['kind']}] {name} — 목록에 없는데 이수했나요? (y/N) ").strip().lower() == "y"
+            acts[it["id"]] = input(f"[{it['section']}] {name} — 목록에 없는데 이수했나요? (y/N) ").strip().lower() == "y"
         elif t == "all_of":
             acts[it["id"]] = [p for p in it["parts"]
-                              if input(f"[{it['kind']}] {it['name']} — {p} 이수? (y/N) ").strip().lower() == "y"]
+                              if input(f"[{it['section']}] {it['name']} — {p} 이수? (y/N) ").strip().lower() == "y"]
         elif t == "count":
-            v = input(f"[{it['kind']}] {name} 참여 횟수 (회당 {it['per']}점): ").strip()
+            v = input(f"[{it['section']}] {name} 참여 횟수 (회당 {it['per']}점): ").strip()
             acts[it["id"]] = int(v) if v.isdigit() else 0
         elif t == "points":
-            v = input(f"[{it['kind']}] {name} 인정 점수 합계: ").strip()
+            v = input(f"[{it['section']}] {name} 인정 점수 합계: ").strip()
             acts[it["id"]] = float(v) if v.replace(".", "").isdigit() else 0
         elif t == "topcit_rule":
             a = input("TOPCIT 응시 횟수: ").strip()

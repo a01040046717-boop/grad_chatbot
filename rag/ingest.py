@@ -46,7 +46,8 @@ def _yr(y0, y1) -> str:
 
 
 def _item_line(it: dict) -> str:
-    s = f"- [{it['kind']}/{it['category']}] {it['name']} ({it['points']:g}점)"
+    sec = it.get("section") or f"대학공통·{'교과' if it['type'] == 'course' else '비교과'}"
+    s = f"- [{sec}/{it['category']}] {it['name']} ({it['points']:g}점)"
     if it["type"] == "count":
         s += f" — 회당 {it['per']}점, {-(-it['points'] // it['per'])}{it.get('unit', '회')} 필요"
     if it["type"] == "all_of":
@@ -98,19 +99,29 @@ def structured_chunks() -> list[Chunk]:
 
     for c in req["common"]:
         y0, y1 = c["years"]
-        txt = (f"대학공통 필수 항목 ({_yr(y0, y1)}학번, 모든 학과 공통, 합계 45점)\n"
+        txt = (f"대학공통 필수 항목 ({_yr(y0, y1)}학번, 모든 학과 공통, 합계 45점, 교과·비교과로 구분)\n"
                + "\n".join(_item_line(i) for i in c["items"]))
         out.append(Chunk(_cid("common", y0), txt, meta["source"], f"대학공통 {_yr(y0, y1)}학번", "", (y0, y1)))
 
+    from .checker import get_requirement_items
     for dept, info in req["departments"].items():
         for t in info["tracks"]:
             y0, y1 = t["years"]
-            st = t["subtotals"]
+            spec = get_requirement_items(dept, y0, req)
+            sec = spec["sections"]
+            parts = []
+            for g in ("대학공통", "학과기준"):
+                subs = [f"{k.split('·')[1]} {v:g}" for k, v in sec.items() if k.startswith(g)]
+                parts.append(f"{g} {spec['groups'][g]:g}점({' + '.join(subs)})")
+            dept_items = [i for i in spec["items"] if i["group"] == "학과기준"]
+            moved = [i for i in dept_items if i["id"].startswith("c_")]
             txt = (f"{dept} {_yr(y0, y1)}학번 다면적 졸업인증제 기준 (SW융합대학)\n"
-                   f"합계 {t['total']}점 = 대학공통 {st['대학공통']} + 교과 {st['교과']} + "
-                   f"비교과지정 {st['비교과지정']} + 비교과미지정 {st['비교과미지정']}\n"
+                   f"합계 {t['total']}점 = " + " + ".join(parts) + "\n"
+                   "구분: 대학공통(교과·비교과) / 학과기준(교과·졸업필수활동·비교과지정·비교과미지정)\n"
                    + _category_line(dept, y0, req) + "\n"
-                   "학과 기준 항목:\n" + "\n".join(_item_line(i) for i in t["items"]))
+                   "학과 기준 항목:\n" + "\n".join(_item_line(i) for i in dept_items))
+            for m in moved:
+                txt += f"\n※ {m['name']}은(는) 이 학과·학번에서 대학공통이 아닌 학과기준({m['kind']})으로 분류됩니다."
             if info.get("unit_rules"):
                 txt += f"\n점수 산정: {info['unit_rules']}"
             for n in info.get("notes", []):

@@ -1,5 +1,7 @@
 /* ===== 졸업요건 RAG 코어 (Python rag/ 모듈의 브라우저 이식) ===== */
-const KINDS = ["대학공통", "교과", "비교과지정", "비교과미지정"];
+const GROUPS = ["대학공통", "학과기준"];
+const SECTIONS = [["대학공통", "교과"], ["대학공통", "비교과"], ["학과기준", "교과"], ["학과기준", "졸업필수활동"], ["학과기준", "비교과지정"], ["학과기준", "비교과미지정"]];
+const KINDS = SECTIONS.map(([g, k]) => `${g}·${k}`);
 const CATEGORIES = ["소통하는 공감인재", "융합하는 창의인재", "공헌하는 글로벌인재"];
 
 function norm(s) {
@@ -60,8 +62,17 @@ function getRequirementItems(dept, year, REQ) {
     warnings.push(`${year}학번의 대학공통 세부 항목은 안내문에 없어 2019~2022 기준으로 계산했습니다. 多Dream비교과센터에 확인하세요.`);
   }
   const info = REQ.departments[dept];
-  return { department: dept, year, trackYears: track.years, total: track.total, subtotals: track.subtotals,
-    items: [...common.items, ...track.items], unitRules: info.unit_rules || "", notes: info.notes || [], warnings };
+  // 구분 2단계: 대학공통(교과·비교과) / 학과기준(교과·졸업필수활동·비교과지정·비교과미지정)
+  const ov = track.common_overrides || {};
+  const items = [
+    ...common.items.map((it) => ({ ...it, group: "대학공통", kind: it.type === "course" ? "교과" : "비교과", ...(ov[it.id] || {}) })),
+    ...track.items.map((it) => ({ ...it, group: "학과기준" })),
+  ].map((it) => ({ ...it, section: `${it.group}·${it.kind}` }));
+  const groups = Object.fromEntries(GROUPS.map((g) => [g, items.filter((i) => i.group === g).reduce((a, i) => a + i.points, 0)]));
+  const sections = {};
+  for (const sec of KINDS) { const v = items.filter((i) => i.section === sec).reduce((a, i) => a + i.points, 0); if (v) sections[sec] = v; }
+  return { department: dept, year, trackYears: track.years, total: track.total, subtotals: track.subtotals, groups, sections,
+    items, unitRules: info.unit_rules || "", notes: info.notes || [], warnings };
 }
 
 function evalItem(it, courses, act, used) {
@@ -132,13 +143,13 @@ function checkGraduation(department, year, courses, activities, REQ) {
   const used = new Set();
   const items = spec.items.map((it) => {
     const [earned, detail] = evalItem(it, list, activities[it.id], used);
-    return { id: it.id, name: it.name, category: it.category, kind: it.kind, required: it.points,
+    return { id: it.id, name: it.name, category: it.category, group: it.group, kind: it.kind, section: it.section, required: it.points,
       earned: Math.round(earned * 100) / 100, passed: earned >= it.points - 1e-9, detail };
   });
+  const sum = (arr, f) => Math.round(arr.reduce((a, r) => a + r[f], 0) * 100) / 100;
+  const byGroup = Object.fromEntries(GROUPS.map((g) => { const rs = items.filter((r) => r.group === g); return [g, { required: sum(rs, "required"), earned: sum(rs, "earned") }]; }));
   const byKind = {};
-  for (const k of KINDS) byKind[k] = {
-    required: items.filter((r) => r.kind === k).reduce((a, r) => a + r.required, 0),
-    earned: items.filter((r) => r.kind === k).reduce((a, r) => a + r.earned, 0) };
+  for (const sec of Object.keys(spec.sections)) { const rs = items.filter((r) => r.section === sec); byKind[sec] = { required: sum(rs, "required"), earned: sum(rs, "earned") }; }
   const byCategory = {};
   for (const c of CATEGORIES) byCategory[c] = {
     required: items.filter((r) => r.category === c).reduce((a, r) => a + r.required, 0),
@@ -146,8 +157,8 @@ function checkGraduation(department, year, courses, activities, REQ) {
   const totalReq = items.reduce((a, r) => a + r.required, 0);
   const totalEarned = Math.round(items.reduce((a, r) => a + r.earned, 0) * 100) / 100;
   return { department: dept, year: y, totalRequired: totalReq, totalEarned, passed: items.every((r) => r.passed),
-    byKind, byCategory, items,
-    missing: items.filter((r) => !r.passed).map((r) => ({ name: r.name, kind: r.kind, category: r.category,
+    byGroup, byKind, byCategory, items,
+    missing: items.filter((r) => !r.passed).map((r) => ({ name: r.name, kind: r.kind, group: r.group, section: r.section, category: r.category,
       need: Math.round((r.required - r.earned) * 100) / 100, detail: r.detail })),
     unmatchedCourses: list.filter((c) => !used.has(c)), warnings: spec.warnings,
     notes: [...spec.notes, ...(spec.unitRules ? [spec.unitRules] : [])] };
@@ -157,9 +168,10 @@ function formatResultText(r) {
   if (r.error) return "⚠️ " + r.error;
   const L = [`[${r.department} ${r.year}학번] 다면적 졸업인증제 판정`,
     `총점 ${r.totalEarned} / ${r.totalRequired}  →  ${r.passed ? "✅ 충족" : "❌ 미충족"}`,
-    "구분별: " + KINDS.map((k) => `${k} ${r.byKind[k].earned}/${r.byKind[k].required}`).join(", "),
+    "구분별: " + GROUPS.map((g) => `${g} ${r.byGroup[g].earned}/${r.byGroup[g].required} (` +
+      Object.entries(r.byKind).filter(([k]) => k.startsWith(g)).map(([k, v]) => `${k.split("·")[1]} ${v.earned}/${v.required}`).join(", ") + ")").join(" / "),
     "인재상별: " + CATEGORIES.map((c) => `${c} ${r.byCategory[c].earned}/${r.byCategory[c].required}`).join(", ")];
-  if (r.missing.length) { L.push("부족한 항목:"); r.missing.forEach((m) => L.push(`  - [${m.kind}/${m.category}] ${m.name}: ${m.need}점 부족 (${m.detail})`)); }
+  if (r.missing.length) { L.push("부족한 항목:"); r.missing.forEach((m) => L.push(`  - [${m.section}/${m.category}] ${m.name}: ${m.need}점 부족 (${m.detail})`)); }
   if (r.unmatchedCourses.length) L.push("졸업인증 항목과 무관한 수강 과목: " + r.unmatchedCourses.join(", "));
   r.warnings.forEach((w) => L.push("※ " + w));
   return L.join("\n");
@@ -170,9 +182,9 @@ function compactRequirements(department, year, REQ) {
   if (!d) return { error: `학과 '${department}'를 찾지 못함. 가능: ${Object.keys(REQ.departments).join(", ")}` };
   const spec = getRequirementItems(d, parseYear(year), REQ);
   if (spec.error) return spec;
-  return { department: d, year: spec.year, total: spec.total, unit_rules: spec.unitRules, notes: spec.notes,
+  return { department: d, year: spec.year, total: spec.total, groups: spec.groups, sections: spec.sections, unit_rules: spec.unitRules, notes: spec.notes,
     items: spec.items.map((it) => {
-      const x = { id: it.id, name: it.name, kind: it.kind, type: it.type, points: it.points };
+      const x = { id: it.id, name: it.name, section: it.section, category: it.category, type: it.type, points: it.points };
       if (it.type === "count") x.per = it.per;
       if (it.type === "choose") { x.options = it.options || `'${it.pattern}' 포함 과목`; x.n = it.n; }
       if (it.type === "all_of") x.parts = it.parts;
@@ -252,5 +264,5 @@ function formatContext(hits) {
   return hits.map((h, i) => `[문서 ${i + 1}] 출처: ${h.chunk.source} / ${h.chunk.location}\n${h.chunk.text}`).join("\n\n");
 }
 
-if (typeof module !== "undefined") module.exports = { CATEGORIES, norm, parseCourseList, resolveDepartment, parseYear, getRequirementItems,
+if (typeof module !== "undefined") module.exports = { CATEGORIES, GROUPS, SECTIONS, norm, parseCourseList, resolveDepartment, parseYear, getRequirementItems,
   checkGraduation, formatResultText, compactRequirements, buildIndex, search, detectProfile, KINDS };

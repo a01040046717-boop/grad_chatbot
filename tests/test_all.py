@@ -7,7 +7,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from rag.checker import (load_requirements, get_requirement_items, check_graduation, parse_course_list,
-                         resolve_department, parse_year, KINDS)
+                         resolve_department, parse_year, DEPT_KINDS)
 from rag.retriever import build_index
 from rag import llm
 
@@ -22,8 +22,10 @@ def test_totals_match_pdf():
             for y in range(t["years"][0], t["years"][1] + 1):
                 items = get_requirement_items(dept, y, REQ)["items"]
                 assert sum(i["points"] for i in items) == t["total"], (dept, y)
-                for k in KINDS:
-                    assert sum(i["points"] for i in items if i["kind"] == k) == t["subtotals"][k], (dept, y, k)
+                assert sum(i["points"] for i in items if i["group"] == "대학공통") == t["subtotals"]["대학공통"], (dept, y)
+                for k in DEPT_KINDS:
+                    got = sum(i["points"] for i in items if i["group"] == "학과기준" and i["kind"] == k)
+                    assert got == t["subtotals"].get(k, 0), (dept, y, k)
 
 
 def test_alias_and_year():
@@ -70,6 +72,17 @@ def test_by_category():
         for t in info["tracks"]:
             r = check_graduation(dept, t["years"][0], "", {})
             assert sum(v["required"] for v in r.by_category.values()) == t["total"]
+
+
+def test_two_level_sections():
+    """AI·빅데이터 22학번: 대학공통 30(교과 20·비교과 10) / 학과기준 65(교과 10·졸업필수활동 15·비교과지정 21·비교과미지정 19)"""
+    r = check_graduation("AI빅데이터", 2022, "", {})
+    assert {g: v["required"] for g, v in r.by_group.items()} == {"대학공통": 30, "학과기준": 65}
+    assert {k: v["required"] for k, v in r.by_kind.items()} == {
+        "대학공통·교과": 20, "대학공통·비교과": 10, "학과기준·교과": 10,
+        "학과기준·졸업필수활동": 15, "학과기준·비교과지정": 21, "학과기준·비교과미지정": 19}
+    r = check_graduation("컴소", 2023, "", {})                 # 다른 학과는 대학공통 45 유지
+    assert r.by_group["대학공통"]["required"] == 45
 
 
 def test_partial_scores():

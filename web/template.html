@@ -112,6 +112,14 @@ aside.sticky { position: sticky; top: 12px; }
 .kinds div { background: var(--bg); border-radius: 8px; padding: 6px 8px; font-size: 12px; color: var(--muted); }
 .kinds strong { display: block; color: var(--ink); font-size: 16px; font-variant-numeric: tabular-nums; }
 .kinds.cats { grid-template-columns: repeat(3, 1fr); margin-top: 0; }
+.grp { display: flex; justify-content: space-between; align-items: baseline; margin-top: 12px; font-size: 13px; font-weight: 700; }
+.grp b { font-variant-numeric: tabular-nums; }
+.kinds.k2 { grid-template-columns: repeat(2, 1fr); margin-top: 6px; }
+.kinds.k3 { grid-template-columns: repeat(3, 1fr); margin-top: 6px; }
+.kinds.k4 { grid-template-columns: repeat(4, 1fr); margin-top: 6px; }
+.bar.top .lab { color: var(--ink); font-weight: 700; }
+.bar.sub { padding-left: 10px; }
+.bar.sub .track { height: 6px; }
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-top: 12px; }
 .seg button { border: 0; background: transparent; padding: 4px 12px; font-size: 12.5px; cursor: pointer; color: var(--muted); }
 .seg button.on { background: var(--accent); color: #fff; }
@@ -286,16 +294,18 @@ window.addEventListener("hashchange", route);
 function renderReqPanel() {
   const s = getRequirementItems(state.dept, state.year, REQ);
   if (s.error) { $("#req-panel").innerHTML = `<div class="panel-b">${esc(s.error)}</div>`; return; }
-  const groups = KINDS.map((k) => {
-    const its = s.items.filter((i) => i.kind === k); if (!its.length) return "";
-    return `<div class="req-group"><h3>${k} · ${s.subtotals[k]}점</h3><ul class="req-list">${its.map((i) =>
+  const groups = Object.entries(s.sections).map(([k, pts]) => {
+    const its = s.items.filter((i) => i.section === k);
+    return `<div class="req-group"><h3>${k} · ${fmt(pts)}점</h3><ul class="req-list">${its.map((i) =>
       `<li><span>${esc(i.name)}</span><span class="pt">${i.type === "count" ? `회당 ${i.per} · ` : ""}${fmt(i.points)}점</span></li>`).join("")}</ul></div>`;
   }).join("");
   $("#req-panel").innerHTML = `
     <div class="panel-h"><h2>내 졸업인증 기준</h2><span class="muted small">${esc(s.department)} ${s.year}학번</span></div>
     <div class="panel-b">
       <div class="total"><b>${s.total}</b><span class="muted">점 필요</span></div>
-      <div class="kinds">${KINDS.map((k) => `<div>${k}<strong>${s.subtotals[k]}</strong></div>`).join("")}</div>
+      ${GROUPS.map((g) => `<div class="grp"><span>${g}</span><b>${fmt(s.groups[g])}점</b></div>
+      <div class="kinds k${Object.keys(s.sections).filter((k) => k.startsWith(g)).length}">${Object.entries(s.sections).filter(([k]) => k.startsWith(g)).map(([k, v]) => `<div>${k.split("·")[1]}<strong>${fmt(v)}</strong></div>`).join("")}</div>`).join("")}
+      <div class="grp"><span>인재상별</span><b></b></div>
       <div class="kinds cats">${CATEGORIES.map((c) => `<div>${CAT_SHORT[c]}<strong>${fmt(s.items.filter((i) => i.category === c).reduce((a, i) => a + i.points, 0))}</strong></div>`).join("")}</div>
       ${groups}
       ${s.unitRules ? `<p class="note">점수 산정: ${esc(s.unitRules)}</p>` : ""}
@@ -310,9 +320,9 @@ function renderForm() {
   if (s.error) { $("#form").innerHTML = `<div class="panel-b">${esc(s.error)}</div>`; return; }
   const html = [];
   if (s.warnings.length) html.push(`<div class="warnbox">${s.warnings.map(esc).join("<br>")}</div>`);
-  for (const k of KINDS) {
-    const its = s.items.filter((i) => i.kind === k); if (!its.length) continue;
-    html.push(`<div class="kind-block"><h3><span>${k}</span><span class="muted small">${s.subtotals[k]}점</span></h3>`);
+  for (const [k, pts] of Object.entries(s.sections)) {
+    const its = s.items.filter((i) => i.section === k);
+    html.push(`<div class="kind-block"><h3><span>${k.replace("·", " · ")}</span><span class="muted small">${fmt(pts)}점</span></h3>`);
     for (const it of its) {
       const id = `f-${it.id}`;
       let ctrl = "", extra = "", hint = it.note || "";
@@ -392,11 +402,12 @@ function recompute() {
         <button type="button" class="${state.view === "cat" ? "" : "on"}" data-view="kind">구분별</button>
         <button type="button" class="${state.view === "cat" ? "on" : ""}" data-view="cat">인재상별</button>
       </div>
-      <div class="bars">${(state.view === "cat" ? CATEGORIES.map((c) => [CAT_SHORT[c], r.byCategory[c]]) : KINDS.map((k) => [k, r.byKind[k]])).map(([k, v]) => {
+      <div class="bars">${(state.view === "cat" ? CATEGORIES.map((c) => [CAT_SHORT[c], r.byCategory[c], ""])
+        : GROUPS.flatMap((g) => [[g, r.byGroup[g], "top"], ...Object.entries(r.byKind).filter(([k]) => k.startsWith(g)).map(([k, v]) => ["└ " + k.split("·")[1], v, "sub"])])).map(([k, v, cls]) => {
         const p = v.required ? Math.min(100, (v.earned / v.required) * 100) : 100;
-        return `<div class="bar ${p >= 100 ? "full" : ""}"><div class="lab"><span>${k}</span><span>${fmt(v.earned)} / ${fmt(v.required)}</span></div><div class="track"><div class="fill" style="width:${p}%"></div></div></div>`; }).join("")}</div>
+        return `<div class="bar ${cls} ${p >= 100 ? "full" : ""}"><div class="lab"><span>${k}</span><span>${fmt(v.earned)} / ${fmt(v.required)}</span></div><div class="track"><div class="fill" style="width:${p}%"></div></div></div>`; }).join("")}</div>
       ${r.missing.length ? `<h3 class="small" style="margin:0 0 6px">부족한 항목 ${r.missing.length}개</h3><ul class="missing">${r.missing.map((m) =>
-        `<li>${esc(m.name)} <b>−${fmt(m.need)}점</b><span class="d">${esc(m.kind)} · ${esc(CAT_SHORT[m.category])} · ${esc(m.detail)}</span></li>`).join("")}</ul>` : `<p>모든 항목을 채웠습니다. 비교과일람표에서 공식 이수내역을 확인하세요.</p>`}
+        `<li>${esc(m.name)} <b>−${fmt(m.need)}점</b><span class="d">${esc(m.section)} · ${esc(CAT_SHORT[m.category])} · ${esc(m.detail)}</span></li>`).join("")}</ul>` : `<p>모든 항목을 채웠습니다. 비교과일람표에서 공식 이수내역을 확인하세요.</p>`}
       ${r.unmatchedCourses.length ? `<p class="note">졸업인증 항목과 관계없는 과목: ${r.unmatchedCourses.map(esc).join(", ")}</p>` : ""}
       <div class="actions"><button class="btn" id="ask-missing" type="button">부족한 부분 챗봇에게 묻기</button></div>
     </div>`;

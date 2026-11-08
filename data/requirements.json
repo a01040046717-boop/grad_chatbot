@@ -13,7 +13,8 @@
    "points": "취득 점수 직접 입력 (세부 항목 합산)",
    "topcit_rule": "TOPCIT 응시 횟수와 달성 수준으로 판정",
    "all_of": "여러 부분을 모두 이수해야 인정 (예: ASP 1·2학기)"
-  }
+  },
+  "structure": "구분은 대학공통(교과·비교과)과 학과기준(교과·졸업필수활동·비교과지정·비교과미지정) 두 단계로 나뉜다."
  },
  "common": [
   {
@@ -26,7 +27,7 @@
      "id": "c_human",
      "name": "인간사랑",
      "category": "소통하는 공감인재",
-     "kind": "대학공통",
+     "kind": "교과",
      "type": "course",
      "points": 5,
      "match": [
@@ -37,7 +38,7 @@
      "id": "c_asp",
      "name": "ASP(1,2학기)",
      "category": "소통하는 공감인재",
-     "kind": "대학공통",
+     "kind": "비교과",
      "type": "all_of",
      "points": 5,
      "note": "1학기·2학기 모두 이수해야 5점",
@@ -50,7 +51,7 @@
      "id": "c_selfcounsel",
      "name": "자기주도상담",
      "category": "소통하는 공감인재",
-     "kind": "대학공통",
+     "kind": "비교과",
      "type": "count",
      "points": 5,
      "per": 1,
@@ -61,7 +62,7 @@
      "id": "c_mm",
      "name": "자기개발과 전공탐색",
      "category": "융합하는 창의인재",
-     "kind": "대학공통",
+     "kind": "교과",
      "type": "course",
      "points": 5,
      "match": [
@@ -74,7 +75,7 @@
      "id": "c_gradact",
      "name": "졸업필수활동",
      "category": "융합하는 창의인재",
-     "kind": "대학공통",
+     "kind": "비교과",
      "type": "points",
      "points": 15,
      "subitems": [],
@@ -84,7 +85,7 @@
      "id": "c_eng",
      "name": "현대기본영어",
      "category": "공헌하는 글로벌인재",
-     "kind": "대학공통",
+     "kind": "교과",
      "type": "course",
      "points": 5,
      "match": [
@@ -95,7 +96,7 @@
      "id": "c_volunteer",
      "name": "봉사학습",
      "category": "공헌하는 글로벌인재",
-     "kind": "대학공통",
+     "kind": "교과",
      "type": "course",
      "points": 5,
      "match": [
@@ -114,7 +115,7 @@
      "id": "c_human",
      "name": "인간사랑",
      "category": "소통하는 공감인재",
-     "kind": "대학공통",
+     "kind": "교과",
      "type": "course",
      "points": 5,
      "match": [
@@ -125,7 +126,7 @@
      "id": "c_asp",
      "name": "ASP(1,2학기)",
      "category": "소통하는 공감인재",
-     "kind": "대학공통",
+     "kind": "비교과",
      "type": "all_of",
      "points": 5,
      "note": "1학기·2학기 모두 이수해야 5점",
@@ -138,7 +139,7 @@
      "id": "c_selfcounsel",
      "name": "자기주도상담",
      "category": "소통하는 공감인재",
-     "kind": "대학공통",
+     "kind": "비교과",
      "type": "count",
      "points": 5,
      "per": 1,
@@ -149,7 +150,7 @@
      "id": "c_mm",
      "name": "자기개발과 전공탐색(M&M)",
      "category": "융합하는 창의인재",
-     "kind": "대학공통",
+     "kind": "교과",
      "type": "course",
      "points": 5,
      "match": [
@@ -162,7 +163,7 @@
      "id": "c_gradguide",
      "name": "졸업종합지도",
      "category": "융합하는 창의인재",
-     "kind": "대학공통",
+     "kind": "비교과",
      "type": "points",
      "points": 15,
      "subitems": [],
@@ -172,7 +173,7 @@
      "id": "c_eng",
      "name": "현대기본영어",
      "category": "공헌하는 글로벌인재",
-     "kind": "대학공통",
+     "kind": "교과",
      "type": "course",
      "points": 5,
      "match": [
@@ -183,7 +184,7 @@
      "id": "c_volunteer",
      "name": "봉사학습",
      "category": "공헌하는 글로벌인재",
-     "kind": "대학공통",
+     "kind": "교과",
      "type": "course",
      "points": 5,
      "match": [
@@ -202,7 +203,7 @@
      "id": "c_human",
      "name": "인간사랑",
      "category": "소통하는 공감인재",
-     "kind": "대학공통",
+     "kind": "교과",
      "type": "course",
      "points": 5,
      "match": [
@@ -213,7 +214,7 @@
      "id": "c_asp",
      "name": "ASP(1,2학기)",
      "category": "소통하는 공감인재",
-     "kind": "대학공통",
+     "kind": "비교과",
      "type": "all_of",
      "points": 5,
      "note": "1학기·2학기 모두 이수해야 5점",
@@ -226,7 +227,7 @@
      "id": "c_selfcounsel",
      "name": "자기주도상담",
      "category": "소통하는 공감인재",
-     "kind": "대학공통",
+     "kind": "비교과",
      "type": "count",
      "points": 5,
      "per": 1,
@@ -237,7 +238,7 @@
      "id": "c_mm",
      "name": "자기개발과 전공탐색(M&M)",
      "category": "융합하는 창의인재",
-     "kind": "대학공통",
+     "kind": "교과",
      "type": "course",
      "points": 5,
      "match": [
@@ -250,7 +251,7 @@
      "id": "c_career",
      "name": "졸업및취·창업지도",
      "category": "융합하는 창의인재",
-     "kind": "대학공통",
+     "kind": "비교과",
      "type": "points",
      "points": 13,
      "subitems": [],
@@ -260,7 +261,7 @@
      "id": "c_ethics1",
      "name": "학습윤리-기본",
      "category": "융합하는 창의인재",
-     "kind": "대학공통",
+     "kind": "비교과",
      "type": "check",
      "points": 1
     },
@@ -268,7 +269,7 @@
      "id": "c_ethics2",
      "name": "학습윤리-심화",
      "category": "융합하는 창의인재",
-     "kind": "대학공통",
+     "kind": "비교과",
      "type": "check",
      "points": 1
     },
@@ -276,7 +277,7 @@
      "id": "c_eng",
      "name": "현대실용영어",
      "category": "공헌하는 글로벌인재",
-     "kind": "대학공통",
+     "kind": "교과",
      "type": "course",
      "points": 5,
      "match": [
@@ -287,7 +288,7 @@
      "id": "c_volunteer",
      "name": "봉사학습",
      "category": "공헌하는 글로벌인재",
-     "kind": "대학공통",
+     "kind": "교과",
      "type": "course",
      "points": 5,
      "match": [
@@ -1605,8 +1606,9 @@
      ],
      "total": 95,
      "subtotals": {
-      "대학공통": 45,
+      "대학공통": 30,
       "교과": 10,
+      "졸업필수활동": 15,
       "비교과지정": 21,
       "비교과미지정": 19
      },
@@ -1725,7 +1727,14 @@
        "points": 10,
        "subitems": []
       }
-     ]
+     ],
+     "common_overrides": {
+      "c_gradact": {
+       "group": "학과기준",
+       "kind": "졸업필수활동",
+       "note": "비교과일람표(학생 확인) 기준: 학과기준의 졸업필수활동으로 분류 (안내문 PDF에는 대학공통으로 표기)"
+      }
+     }
     },
     {
      "years": [
