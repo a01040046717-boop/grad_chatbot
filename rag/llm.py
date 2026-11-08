@@ -18,7 +18,8 @@ from dataclasses import dataclass, field
 
 from .checker import (check_graduation, format_result_text, get_requirement_items,
                       resolve_department, parse_year, load_requirements)
-from .retriever import Retriever, format_context
+from .retriever import Retriever, format_context, detect_profile
+from .extract import extract_inputs, is_check_request
 
 CHAT_MODEL = os.getenv("CHAT_MODEL", "gpt-4o-mini")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "text-embedding-3-small")
@@ -196,10 +197,29 @@ def answer(question: str, retriever: Retriever, client=None, history: list[dict]
     context = format_context(retrieved)
     state = {"department": dept, "year": year, "sources": list(retrieved), "check_result": None}
 
-    if client is None:
-        return _offline_answer(question, retrieved, check_text)
+    # 졸업 판정 요청이면 문장에서 과목·활동을 규칙으로 먼저 인식해 판정 (작은 모델·오프라인 보완)
+    auto = None
+    d2, y2 = detect_profile(question)
+    if d2 and d2 != dept:
+        dept, year = d2, y2 or year
+    elif y2:
+        year = y2
+    if dept and year and is_check_request(question):
+        ext = extract_inputs(question, dept, year)
+        if ext["recognized"]:
+            res = check_graduation(dept, year, ext["courses"], ext["activities"])
+            if not isinstance(res, dict):
+                state["check_result"] = res.to_dict()
+                auto = "문장에서 인식한 입력: " + ", ".join(ext["recognized"]) + "\n" + format_result_text(res)
 
-    messages = [{"role": "system", "content": SYSTEM_PROMPT + _profile_block(profile, check_text)}]
+    if client is None:
+        return _offline_answer(question, retrieved, check_text, auto, state["check_result"])
+
+    sys_block = _profile_block(profile, check_text)
+    if auto:
+        sys_block += ("\n\n[학생 문장에서 자동 인식한 입력과 판정 결과 (판정 엔진 계산값)]\n" + auto +
+                      "\n→ 이 계산값을 사용해 답하라. 학생이 말했는데 인식되지 않은 항목이 있으면 check_graduation 도구로 다시 계산하라.")
+    messages = [{"role": "system", "content": SYSTEM_PROMPT + sys_block}]
     for h in (history or [])[-8:]:
         messages.append({"role": h["role"], "content": h["content"]})
     messages.append({"role": "user", "content": f"[참고 문서]\n{context}\n\n[질문]\n{question}"})
@@ -210,6 +230,8 @@ def answer(question: str, retriever: Retriever, client=None, history: list[dict]
                                               temperature=0.1)
         msg = resp.choices[0].message
         if not msg.tool_calls:
+            if auto:
+                trace.insert(0, ("문장 자동 인식", {}, auto[:600]))
             return Answer(msg.content or "", _dedup_sources(state["sources"]), trace, state["check_result"])
         messages.append({"role": "assistant", "content": msg.content or "",
                          "tool_calls": [tc.model_dump() for tc in msg.tool_calls]})
@@ -237,10 +259,13 @@ def _dedup_sources(results):
     return out
 
 
-def _offline_answer(question, retrieved, check_text) -> Answer:
-    parts = ["🔌 **오프라인 모드** (OPENAI_API_KEY 없음) — LLM 생성 없이 검색된 근거만 보여줍니다.\n"]
-    if check_text and any(w in question for w in ["부족", "충족", "졸업", "가능", "남은"]):
+def _offline_answer(question, retrieved, check_text, auto=None, check_result=None) -> Answer:
+    parts = ["🔌 **오프라인 모드** (LLM 없음) — 판정 엔진 계산과 검색된 근거로 답합니다.\n"]
+    if auto:
+        parts.append("**말씀하신 내용으로 계산한 졸업인증 판정**\n```\n" + auto + "\n```\n"
+                     "빠진 항목이 있으면 '졸업 자가진단' 탭에서 직접 입력해 주세요.")
+    elif check_text and any(w in question for w in ["부족", "충족", "졸업", "가능", "남은"]):
         parts.append("**최근 자가진단 결과**\n```\n" + check_text + "\n```")
     for i, (c, s) in enumerate(retrieved[:3], 1):
         parts.append(f"**[문서 {i}] {c.source} / {c.location}** (유사도 {s:.2f})\n```\n{c.text[:900]}\n```")
-    return Answer("\n\n".join(parts), _dedup_sources(retrieved))
+    return Answer("\n\n".join(parts), _dedup_sources(retrieved), check_result=check_result)

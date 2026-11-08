@@ -270,5 +270,97 @@ function formatContext(hits) {
   return hits.map((h, i) => `[문서 ${i + 1}] 출처: ${h.chunk.source} / ${h.chunk.location}\n${h.chunk.text}`).join("\n\n");
 }
 
-if (typeof module !== "undefined") module.exports = { CATEGORIES, GROUPS, SECTIONS, norm, parseCourseList, resolveDepartment, parseYear, getRequirementItems,
+/* ---------- 문장 → 판정 입력 자동 인식 (Python rag/extract.py 이식) ---------- */
+const KNUM = { "한": 1, "두": 2, "세": 3, "네": 4, "다섯": 5, "여섯": 6, "일곱": 7, "여덟": 8, "아홉": 9, "열": 10 };
+const NUMP = "(\\d+|다섯|여섯|일곱|여덟|아홉|한|두|세|네|열)";
+const NEGP = /^.{0,6}?(안\s*했|안\s*함|못|아직|없|안\s*땄|안\s*받|불합격|떨어)/;
+const CHECK_INTENT = /졸업\s*(가능|할\s*수|돼|되)|충족|부족|모자|남은|남았|몇\s*점|판정|채웠|채워|계산/;
+const CHECK_KEYS = [["코딩역량", ["코딩역량"]], ["AI·SW전공역량", ["ai·sw전공역량", "aisw전공역량", "aisw역량", "전공역량졸업인증", "aisw"]],
+  ["학술제", ["학술제"]], ["중핵교양", ["중핵교양"]], ["학습윤리-기본", ["학습윤리기본", "학습윤리-기본"]], ["학습윤리-심화", ["학습윤리심화", "학습윤리-심화"]],
+  ["국제박람회", ["국제박람회", "박람회"]], ["진로(취업)지도", ["진로지도", "취업지도"]], ["간담회", ["간담회"]]];
+const COUNT_KEYS = [["자기주도상담", ["자기주도상담"]], ["지도교수상담", ["지도교수상담", "교수상담"]], ["졸업상담", ["졸업상담"]],
+  ["진로 및 취업상담", ["진로및취업상담", "취업상담", "진로상담"]], ["전공상담", ["전공상담"]], ["학과활동", ["학과활동"]],
+  ["MT", ["mt", "엠티"]], ["TOPCIT", ["topcit", "탑싯"]]];
+const GOT = "(취득|땄|따|합격|획득|붙|있)", TOOK = "(응시|봤|보|쳤|치)";
+const knum = (s) => (/^\d+$/.test(s) ? parseInt(s, 10) : KNUM[s] || 0);
+const pat = (w) => [...w].filter((c) => !/\s/.test(c)).map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s*");
+function findCount(text, words, units = "(번|회|차례|학기)") {
+  for (const w of words) { const m = text.match(new RegExp(pat(w) + "[^0-9\\n.,]{0,10}?" + NUMP + "\\s*" + units, "i")); if (m) return knum(m[1]); }
+  return null;
+}
+function mentioned(text, words) {
+  const low = text.toLowerCase();
+  for (const w of words) { const re = new RegExp(pat(w), "gi"); let m;
+    while ((m = re.exec(low))) { if (!NEGP.test(low.slice(m.index + m[0].length, m.index + m[0].length + 12))) return true; } }
+  return false;
+}
+function extractInputs(text, dept, year, REQ) {
+  const spec = getRequirementItems(dept, year, REQ);
+  if (spec.error) return { courses: [], activities: {}, recognized: [] };
+  const courses = [], acts = {}, recog = [];
+  const names = new Set();
+  for (const it of spec.items) {
+    if (it.type === "course") (it.match || [it.name]).forEach((n) => names.add(n));
+    if (it.type === "choose") [...(it.options || []), ...(it.substitutes || [])].forEach((n) => names.add(n));
+  }
+  let rest = norm(text);
+  for (const n of [...names].sort((a, b) => norm(b).length - norm(a).length)) {
+    const k = norm(n); if (k && rest.includes(k)) { courses.push(n); recog.push(`과목 ${n}`); rest = rest.split(k).join("■"); }
+  }
+  for (const it of spec.items) if (it.type === "choose" && it.pattern) {
+    const m = text.match(new RegExp(pat(it.pattern) + "[^0-9]{0,6}" + NUMP + "\\s*(과목|개)"));
+    if (m) { for (let j = 0; j < knum(m[1]); j++) courses.push(`${it.pattern}${j + 1}`); recog.push(`${it.pattern} ${knum(m[1])}과목`); }
+  }
+  for (const it of spec.items) {
+    const nn = norm(it.name);
+    if (it.type === "count") {
+      for (const [core, words] of COUNT_KEYS) if (nn.includes(norm(core))) {
+        const n = findCount(text, words); if (n !== null) { acts[it.id] = n; recog.push(`${it.name.replace(/\s*\d+회$/, "")} ${n}회`); } break; }
+    } else if (it.type === "check") {
+      for (const [core, words] of CHECK_KEYS) if (nn.includes(norm(core))) { if (mentioned(text, words)) { acts[it.id] = true; recog.push(it.name); } break; }
+    } else if (it.type === "all_of") {
+      const low = text.toLowerCase(), i = low.indexOf("asp");
+      if (i >= 0 && !NEGP.test(low.slice(i + 3, i + 15))) {
+        const win = low.slice(i + 3, i + 23);
+        const parts = it.parts.filter((p) => win.includes(p) && !win.includes("모두") && !win.includes("다 "));
+        acts[it.id] = parts.length && parts.length < it.parts.length && win.includes("만") ? parts : [...it.parts];
+        recog.push(`${it.name} (${acts[it.id].join(", ")})`);
+      }
+    } else if (it.type === "topcit_rule") {
+      const n = findCount(text, ["topcit", "탑싯"], "(번|회)"); const lv = text.match(/(수준|레벨|level|lv)\s*(\d)/i);
+      if (n !== null || lv) { acts[it.id] = { attempts: n || 0, level: lv ? +lv[2] : 0 }; recog.push(`TOPCIT 응시 ${n || 0}회, 수준 ${lv ? lv[2] : 0}`); }
+    } else if (it.type === "points") {
+      const subs = {}; let other = 0;
+      for (const s of it.subitems || []) {
+        const sname = s.name, base = sname.replace(/\s*\(.*?\)/g, "");
+        const abbr = [...sname.matchAll(/\(([A-Za-z]+)\)/g)].map((m) => m[1]);
+        const core = base.replace(/\s*(취득|응시|이상|\(.*)$/, "").trim();
+        const words = [core, ...abbr].filter(Boolean);
+        if (s.mode === "check") {
+          let ok;
+          if (sname.startsWith("토익스피킹")) { const m = text.match(/토익\s*스피킹\D{0,6}(\d{2,3})/); ok = !!(m && +m[1] >= 100); }
+          else if (sname.startsWith("토익")) { const m = text.match(/토익(?!\s*스피킹)\D{0,6}(\d{3})/); ok = !!(m && +m[1] >= 500); }
+          else if (sname.toLowerCase().startsWith("opic")) ok = /opic\D{0,6}(im|ih|al|m1|m2|m3)/i.test(text);
+          else if (sname.endsWith("취득")) ok = words.some((w) => new RegExp(pat(w) + "[^,.\\n고]{0,10}?" + GOT, "i").test(text)) && mentioned(text, words);
+          else if (sname.endsWith("응시")) ok = words.some((w) => new RegExp(pat(w) + "[^,.\\n고]{0,10}?" + TOOK, "i").test(text));
+          else ok = mentioned(text, words);
+          if (ok) { subs[sname] = true; recog.push(sname); }
+        } else if (s.mode === "count") {
+          const n = findCount(text, words); if (n !== null) { subs[sname] = n; recog.push(`${core} ${n}${sname.includes("학기") ? "학기" : "회"}`); }
+        } else if (s.mode === "number") {
+          const m = text.match(new RegExp(pat(core) + "\\D{0,8}?(\\d+)\\s*점")); if (m) { subs[sname] = +m[1]; recog.push(`${core} ${m[1]}점`); }
+        }
+      }
+      if (!(it.subitems || []).length) {
+        const core = it.name.replace(/\s*\(.*$/, ""); const m = text.match(new RegExp(pat(core) + "\\D{0,8}?(\\d+)\\s*점"));
+        if (m) { other = +m[1]; recog.push(`${core} ${m[1]}점`); }
+      }
+      if (Object.keys(subs).length || other) acts[it.id] = { subitems: subs, other };
+    }
+  }
+  return { courses, activities: acts, recognized: recog };
+}
+const isCheckRequest = (t) => CHECK_INTENT.test(t);
+
+if (typeof module !== "undefined") module.exports = { extractInputs, isCheckRequest, CATEGORIES, GROUPS, SECTIONS, norm, parseCourseList, resolveDepartment, parseYear, getRequirementItems,
   checkGraduation, formatResultText, compactRequirements, buildIndex, search, detectProfile, KINDS };

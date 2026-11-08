@@ -544,9 +544,24 @@ function keyLines(q, hits, n = 5) {
   return cand.filter((x) => x.s >= cut && !seen.has(x.t) && seen.add(x.t)).slice(0, n);
 }
 
-function offlineAnswer(q, hits) {
+function autoJudgeMarkdown(auto) {
+  const r = auto.res, cols = GROUPS.flatMap((g) => Object.keys(r.matrix[g]).map((c) => [g, c]));
+  const L = [`**말씀하신 내용으로 계산한 졸업인증 판정** (${r.department} ${r.year}학번)`,
+    "인식한 입력: " + auto.rec.join(", "), "",
+    `**총점 ${fmt(r.totalEarned)} / ${fmt(r.totalRequired)}점 → ${r.passed ? "충족" : "미충족"}**`, "",
+    "| 구분 | " + cols.map(([g, c]) => `${g.slice(0, 2)} ${c}`).join(" | ") + " | 졸업점수 |",
+    "|---|" + cols.map(() => "---").join("|") + "|---|",
+    "| 필요 | " + cols.map(([g, c]) => fmt(r.matrix[g][c].required)).join(" | ") + ` | ${fmt(r.totalRequired)} |`,
+    "| 이수 | " + cols.map(([g, c]) => fmt(r.matrix[g][c].earned)).join(" | ") + ` | ${fmt(r.totalEarned)} |`];
+  if (r.missing.length) { L.push("", "**부족한 항목**"); r.missing.slice(0, 8).forEach((m) => L.push(`- ${m.name}: ${fmt(m.need)}점 부족 (${m.detail})`)); if (r.missing.length > 8) L.push(`- 외 ${r.missing.length - 8}개`); }
+  L.push("", "_빠진 항목은 졸업 자가진단 탭에서 직접 입력해 주세요._");
+  return L.join("\n");
+}
+
+function offlineAnswer(q, hits, auto) {
   const parts = [];
   const wantsCheck = /졸업\s*가능|충족|부족|남은|모자|채우/.test(q);
+  if (auto) { parts.push(autoJudgeMarkdown(auto)); return parts.join("\n\n"); }
   if (wantsCheck && state.touched && state.lastCheck && !state.lastCheck.error)
     parts.push(`**자가진단 결과**\n\`\`\`\n${formatResultText(state.lastCheck)}\n\`\`\``);
   else if (wantsCheck) parts.push("졸업 가능 여부는 **졸업 자가진단** 탭에서 과목과 활동을 입력하면 바로 계산돼요.");
@@ -578,15 +593,24 @@ async function ask(q) {
   state.busy = true; $("#send").disabled = true; $("#q").value = "";
   addMsg("user", esc(q).replace(/\n/g, "<br>"));
   const hits = search(INDEX, q, 5, state.dept, state.year, REQ);
+  // 졸업 판정 요청이면 문장에서 과목·활동을 규칙으로 인식해 판정 엔진으로 계산
+  let auto = null;
+  const [qd, qy] = detectProfile(q, REQ);
+  const jd = qd || state.dept, jy = qy || (qd && qd !== state.dept ? null : state.year);
+  if (jy && isCheckRequest(q)) {
+    const e = extractInputs(q, jd, jy, REQ);
+    if (e.recognized.length) { const r = checkGraduation(jd, jy, e.courses, e.activities, REQ); if (!r.error) auto = { rec: e.recognized, res: r }; }
+  }
   const bubble = addMsg("bot", `<span class="thinking">문서를 찾는 중…</span>`);
   const sample = aiOff ? null : await getSample();
   let text = "", sources = [...hits], trace = [];
   if (!sample) {
     setMode(false);
-    text = offlineAnswer(q, hits);
+    text = offlineAnswer(q, hits, auto);
   } else {
     const ctx = [`[학생 프로필] 학과: ${state.dept}, 학번: ${state.year}`];
     if (state.touched && state.lastCheck && !state.lastCheck.error) ctx.push(`[학생이 자가진단 탭에서 입력한 최근 판정 결과]\n${formatResultText(state.lastCheck)}`);
+    if (auto) ctx.push(`[학생 문장에서 자동 인식한 입력과 판정 결과 (판정 엔진 계산값)]\n인식한 입력: ${auto.rec.join(", ")}\n${formatResultText(auto.res)}\n→ 이 계산값을 사용해 답하라. 인식되지 않은 항목이 있으면 check_graduation 도구로 다시 계산하라.`);
     const final = `${PROMPT}\n\n${ctx.join("\n\n")}\n\n[참고 문서]\n${formatContext(hits)}\n\n[질문]\n${q}`;
     const messages = [...state.history.slice(-8), { role: "user", content: final }];
     try {
@@ -594,9 +618,9 @@ async function ask(q) {
         onText: ({ text: t }) => { bubble.innerHTML = t ? md(t) : `<span class="thinking">답변을 정리하는 중…</span>`; $("#msgs").scrollTop = $("#msgs").scrollHeight; } });
       text = res.text || "";
     } catch (e) {
-      if (e && e.code === "not_granted") { aiOff = true; setMode(false); text = offlineAnswer(q, hits); }
-      else if (e && e.code === "rate_limited") text = "질문이 몰려 잠시 답변할 수 없어요. 조금 뒤에 다시 보내 주세요.\n\n" + offlineAnswer(q, hits);
-      else text = (e && e.text) ? e.text : "답변을 만들지 못했어요. 다시 시도해 주세요.\n\n" + offlineAnswer(q, hits);
+      if (e && e.code === "not_granted") { aiOff = true; setMode(false); text = offlineAnswer(q, hits, auto); }
+      else if (e && e.code === "rate_limited") text = "질문이 몰려 잠시 답변할 수 없어요. 조금 뒤에 다시 보내 주세요.\n\n" + offlineAnswer(q, hits, auto);
+      else text = (e && e.text) ? e.text : "답변을 만들지 못했어요. 다시 시도해 주세요.\n\n" + offlineAnswer(q, hits, auto);
     }
   }
   const seen = new Set(); sources = sources.filter((h) => { const k = h.chunk.id; if (seen.has(k)) return false; seen.add(k); return true; });

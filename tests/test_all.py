@@ -198,7 +198,7 @@ def test_llm_tool_loop():
     r = build_index(verbose=False)
     a = llm.answer("인간사랑, 예비창업설계 들었고 학과활동 3번 했어. 졸업 가능?", r, FakeClient(),
                    profile={"department": "AI·빅데이터학과", "year": 2022})
-    assert [t[0] for t in a.tool_calls] == ["get_requirements", "check_graduation"]
+    assert [t[0] for t in a.tool_calls] == ["문장 자동 인식", "get_requirements", "check_graduation"]
     assert a.check_result and a.check_result["total_earned"] == 13   # 인간사랑5 + 예비창업5 + 학과활동3
     assert a.sources
 
@@ -233,11 +233,34 @@ def test_local_llm_wrapper():
     r = build_index(verbose=False)
     a = llm.answer("인간사랑, 예비창업설계 들었고 학과활동 3번, 자기주도상담 2번 했어. 졸업 가능해?", r, client,
                    profile={"department": "AI·빅데이터학과", "year": 2022})
-    assert [t[0] for t in a.tool_calls] == ["check_graduation"]
+    assert [t[0] for t in a.tool_calls] == ["문장 자동 인식", "check_graduation"]
     assert a.check_result["total_earned"] == 15 and "미충족" in a.text
     assert llm.make_embedder(client) is None and "오픈소스" in llm.model_label(client)
     m = parse_output('<tool_call>{"name":"search_documents","arguments":"{\\"query\\": \\"TOPCIT\\"}"}</tool_call>')
     assert m.tool_calls[0].function.name == "search_documents" and json.loads(m.tool_calls[0].function.arguments) == {"query": "TOPCIT"}
+
+
+def test_sentence_extraction():
+    """채팅 문장 → 과목·활동 자동 인식 (작은 모델·오프라인에서도 채팅 판정)"""
+    from rag.extract import extract_inputs, is_check_request
+    def score(q, d, y):
+        e = extract_inputs(q, d, y)
+        return check_graduation(d, y, e["courses"], e["activities"]).total_earned
+    assert score("인간사랑, 현대기본영어, 봉사학습, 예비창업설계 들었고 학과활동 3번, SQLD 땄어. 졸업 가능해?", "AI·빅데이터학과", 2022) == 29
+    assert score("자기주도상담 두 번 했고 ASP 1학기만 들었어. 코딩역량인증제는 아직 못 땄어. 졸업필수활동 10점이야", "AI·빅데이터학과", 2022) == 12
+    assert score("캡스톤디자인, 산학캡스톤디자인, 전공영어기초 들었고 전공상담 4번, 학술제 발표했어. TOPCIT 2번 응시", "컴퓨터소프트웨어공학과", 2022) == 31
+    assert score("TOPCIT 3번 응시해서 수준2 달성했고 맛있는SW 들었어", "메타버스&게임학과", 2024) == 10
+    assert score("지도교수상담 2회, 학과활동 5회, 정보처리기사 응시했고 ADsP 취득했어", "사물인터넷학과", 2024) == 2 + 5 + 7
+    assert score("학과학술동아리 2학기 했고 C프로그래밍 들었어. 학과활동 열 번", "정보보호학과", 2023) == 21
+    assert is_check_request("졸업 가능해?") and not is_check_request("학과활동은 몇 번 해야 해?")
+
+
+def test_offline_chat_judgement():
+    """LLM 없이도 채팅 문장으로 졸업 판정 결과를 답한다"""
+    r = build_index(verbose=False)
+    a = llm.answer("인간사랑, 예비창업설계 들었고 학과활동 3번 했어. 졸업 가능해?", r, None,
+                   profile={"department": "AI·빅데이터학과", "year": 2022})
+    assert a.check_result["total_earned"] == 13 and "판정" in a.text
 
 
 def test_offline_mode():
