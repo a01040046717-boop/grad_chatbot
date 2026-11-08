@@ -204,15 +204,26 @@ def read_document(path: Path) -> list[tuple[str, str]]:
     return []
 
 
+def display_names(docs_dir: Path = DOCS_DIR) -> dict:
+    """docs/_names.json: 파일 이름(영문) → 답변에 보여줄 이름(한글)"""
+    p = docs_dir / "_names.json"
+    if p.exists():
+        import json
+        return {k: v for k, v in json.loads(p.read_text(encoding="utf-8")).items() if not k.startswith("_")}
+    return {}
+
+
 def document_chunks(docs_dir: Path = DOCS_DIR) -> list[Chunk]:
     out = []
+    names = display_names(docs_dir)
     for path in sorted(docs_dir.glob("**/*")):
         if path.suffix.lower() not in SUPPORTED or path.name.startswith((".", "_")):  # _README 등 안내 파일 제외
             continue
         for loc, text in read_document(path):
             for j, piece in enumerate(_split(text, size=1800 if path.suffix.lower() == ".md" else 700)):
                 dept = _guess_dept(piece) if path.suffix.lower() == ".pdf" else ""  # 일반 안내 문서는 전 학과 공통
-                out.append(Chunk(_cid(path.name, loc, j, piece[:50]), piece, path.name,
+                src = names.get(path.name, path.name)
+                out.append(Chunk(_cid(src, loc, j, piece[:50]), piece, src,
                                  f"{loc}" + (f" #{j + 1}" if j else ""), dept))
     return out
 

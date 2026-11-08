@@ -4,8 +4,8 @@
 
 | 요구사항 | 구현 |
 |---|---|
-| 1. 다면적졸업인증제 PDF 넣기 | `docs/2026_다면적졸업인증제_SW융합대학.pdf` + PDF의 표를 구조화한 `data/requirements.json` |
-| 2. 안내받은 다른 문서도 넣기 | 순천향대 공식 홈페이지·SW중심대학사업단 안내를 정리한 `docs/순천향대_졸업인증_관련_공식안내.md` (졸업요건 구성, SW기초교육 의무, AI·SW 전공역량 졸업인증제 200점 점수표, 코딩역량 인증제, TOPCIT 혜택, 비교과 점수 프로그램, ASP·多Dream비교과센터, 항목별 출처 URL) + `docs/` 폴더에 PDF·TXT·MD·DOCX를 넣거나 앱에서 업로드하면 자동 인덱싱 |
+| 1. 다면적졸업인증제 PDF 넣기 | `docs/2026_SCH_SW_graduation_certification.pdf` + PDF의 표를 구조화한 `data/requirements.json` |
+| 2. 안내받은 다른 문서도 넣기 | 순천향대 공식 홈페이지·SW중심대학사업단 안내를 정리한 `docs/sch_official_guide.md` (졸업요건 구성, SW기초교육 의무, AI·SW 전공역량 졸업인증제 200점 점수표, 코딩역량 인증제, TOPCIT 혜택, 비교과 점수 프로그램, ASP·多Dream비교과센터, 항목별 출처 URL) + `docs/` 폴더에 PDF·TXT·MD·DOCX를 넣거나 앱에서 업로드하면 자동 인덱싱 |
 | 3. 활동 체크 + 수업 리스트 → 졸업 충족 판정 | ① **자가진단 탭**: 체크박스/횟수 입력 + 과목 리스트 붙여넣기 ② **채팅**: 문장으로 설명하면 LLM이 `check_graduation` 도구를 호출 |
 
 ---
@@ -13,10 +13,10 @@
 ## 1. 실행 방법
 
 ### ⭐ 모든 기능 실행: Colab (설치·API 키 불필요)
-`졸업요건_RAG_챗봇.ipynb`를 [Colab](https://colab.research.google.com)에 업로드하고 **런타임 → 모두 실행**을 누르면, API 키 없이 **무료 오픈소스 LLM(Qwen2.5)** 을 Colab GPU에서 직접 실행해 LLM 답변·채팅 졸업 판정까지 모든 기능이 동작합니다. 마지막 셀에 챗봇 화면과 공개 링크가 나옵니다. (Colab 보안 비밀에 `GEMINI_API_KEY`가 있으면 Gemini 사용)
+`grad_chatbot_colab.ipynb`를 [Colab](https://colab.research.google.com)에 업로드하고 **런타임 → 모두 실행**을 누르면, API 키 없이 **무료 오픈소스 LLM(Qwen2.5)** 을 Colab GPU에서 직접 실행해 LLM 답변·채팅 졸업 판정까지 모든 기능이 동작합니다. 마지막 셀에 챗봇 화면과 공개 링크가 나옵니다. (Colab 보안 비밀에 `GEMINI_API_KEY`가 있으면 Gemini 사용)
 
 ### 설치 없이 바로 보기: `web/index.html` 더블클릭 (자가진단·문서 검색)
-영구적인 웹 링크로 제출하는 방법은 `배포가이드_웹링크.md`를 참고하세요.
+영구적인 웹 링크로 제출하는 방법은 `DEPLOY_GUIDE.md`를 참고하세요.
 
 ### 로컬 실행
 ```bash
@@ -101,7 +101,7 @@ python tests/test_all.py      # 테스트 13개
 
 ## 파일 구성
 ```
-졸업요건_RAG_챗봇.ipynb Colab 노트북 (모두 실행 → Gradio 챗봇 + 공개 링크)
+grad_chatbot_colab.ipynb Colab 노트북 (모두 실행 → Gradio 챗봇 + 공개 링크)
 app.py                 Streamlit 앱 (Q&A 탭 + 자가진단 탭) — 웹 배포용
 gradio_app.py          Gradio 앱 (Colab/노트북용)
 cli.py                 터미널 챗봇
@@ -112,6 +112,6 @@ rag/local_llm.py       무료 오픈소스 LLM(Qwen2.5) 직접 실행 (API 키 �
 rag/extract.py         채팅 문장 → 과목·활동 자동 인식 (작은 모델·LLM 없이도 채팅 판정)
 rag/checker.py         졸업요건 규칙 엔진
 data/requirements.json PDF 표 구조화 데이터 (대학공통 3종 + 6개 학과 21개 학번 구간)
-docs/                  RAG 원문 문서 (여기에 다른 안내문 추가)
+docs/                  RAG 원문 문서 (PDF, 공식안내 md) — 다른 안내문은 여기에 추가, 표시 이름은 docs/_names.json
 tests/test_all.py      데이터 무결성·판정·검색·LLM 루프(가짜 클라이언트) 테스트
 ```
