@@ -109,8 +109,8 @@ def build_demo(default_dept: str = "AI·빅데이터학과", default_year: int =
         with gr.Tab("✅ 졸업 자가진단"):
             with gr.Row():
                 with gr.Column(scale=2):
-                    courses = gr.Textbox(lines=12, label="📘 수강한 교과목 리스트 (한 줄에 하나, 성적표 붙여넣기 가능)",
-                                         placeholder="인간사랑\n현대기본영어 A+\n봉사학습(1학점)\n예비창업설계")
+                    courses = gr.Textbox(lines=12, label="📘 수강한 교과목 리스트 (한 줄에 한 과목)",
+                                         placeholder="인간사랑\n현대기본영어\n봉사학습\n예비창업설계")
                     result = gr.Markdown("왼쪽/오른쪽을 입력하고 **판정하기**를 누르세요.")
                 with gr.Column(scale=3):
                     @gr.render(inputs=[dept, year])

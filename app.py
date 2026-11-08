@@ -113,9 +113,9 @@ with tab_check:
         with col_l:
             st.markdown("#### 📘 수강한 교과목 리스트")
             course_text = st.text_area(
-                "한 줄에 한 과목 (또는 쉼표 구분). 성적표를 그대로 붙여넣어도 학점/성적은 자동 제거돼요.",
+                "한 줄에 한 과목씩 과목명을 적어 주세요 (쉼표로 구분해도 됩니다).",
                 height=260, key=kp + "courses",
-                placeholder="예)\n인간사랑\n현대기본영어 A+\n봉사학습(1학점)\n예비창업설계\n자기개발과 전공탐색")
+                placeholder="예)\n인간사랑\n현대기본영어\n봉사학습\n예비창업설계\n자기개발과 전공탐색")
             parsed = parse_course_list(course_text)
             if parsed:
                 st.caption("인식된 과목: " + ", ".join(parsed))
