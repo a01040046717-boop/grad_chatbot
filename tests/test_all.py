@@ -304,6 +304,24 @@ def test_colab_ui_bridge():
     assert s["done"] and not s["error"] and s["text"] == "학과활동은 5회 참여해요."
 
 
+def test_extra_document_retrieval():
+    """졸업요건 추가 자료(학칙·교육과정)도 검색되어야 한다"""
+    r = build_index(verbose=False)
+    for q, loc in [("졸업하려면 몇 학점 들어야 해?", "[1] 총 졸업학점"), ("한 학기에 최대 몇 학점까지 수강신청 가능해?", "[2]"),
+                   ("중핵교양은 몇 과목 들어야 돼?", "[3] 중핵교양"), ("머신러닝은 몇 학년 과목이야?", "2학년"),
+                   ("졸업 최저 평점이 몇이야?", "[6] 확인하지 못한")]:
+        res = r.search(q, k=5, department="AI·빅데이터학과", year=2022)
+        assert any(c.source == "순천향대_졸업요건_추가자료.md" and loc in c.location for c, _ in res), q
+
+
+def test_check_intent():
+    from rag.extract import is_check_request
+    assert not is_check_request("AI·SW전공역량졸업인증제 200점은 어떻게 채워?")
+    assert not is_check_request("자가진단 결과에서 부족한 항목을 어떻게 채우면 되는지 알려줘")
+    assert is_check_request("인간사랑 들었고 학과활동 3번 했어. 졸업 가능해?")
+    assert is_check_request("SQLD 땄는데 어떻게 돼? 졸업 가능해?")
+
+
 def test_offline_chat_judgement():
     """LLM 없이도 채팅 문장으로 졸업 판정 결과를 답한다"""
     r = build_index(verbose=False)

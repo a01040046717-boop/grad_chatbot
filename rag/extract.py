@@ -173,5 +173,12 @@ def extract_inputs(text: str, dept: str, year: int) -> dict:
     return {"courses": courses, "activities": acts, "recognized": recog}
 
 
+HOWTO_INTENT = re.compile(r"어떻게|방법|뭐야|뭔가|무엇|어디서")
+DONE_SIGNAL = re.compile(r"졸업\s*(가능|할\s*수|돼|되)|판정|들었|했어|했고|했는데|땄|취득했|이수했|참여했|응시했")
+
+
 def is_check_request(text: str) -> bool:
-    return bool(CHECK_INTENT.search(text))
+    """졸업 판정 요청인가? ('…어떻게 채워?' 같은 방법 질문은 제외, 단 들었/했 등 이수 사실을 말하면 판정)"""
+    if not CHECK_INTENT.search(text):
+        return False
+    return not (HOWTO_INTENT.search(text) and not DONE_SIGNAL.search(text))

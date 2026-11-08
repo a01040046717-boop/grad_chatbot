@@ -360,7 +360,10 @@ function extractInputs(text, dept, year, REQ) {
   }
   return { courses, activities: acts, recognized: recog };
 }
-const isCheckRequest = (t) => CHECK_INTENT.test(t);
+const HOWTO_INTENT = /어떻게|방법|뭐야|뭔가|무엇|어디서/;
+const DONE_SIGNAL = /졸업\s*(가능|할\s*수|돼|되)|판정|들었|했어|했고|했는데|땄|취득했|이수했|참여했|응시했/;
+// '…어떻게 채워?' 같은 방법 질문은 판정 요청이 아님 (들었/했 등 이수 사실을 말하면 판정)
+const isCheckRequest = (t) => CHECK_INTENT.test(t) && !(HOWTO_INTENT.test(t) && !DONE_SIGNAL.test(t));
 
 if (typeof module !== "undefined") module.exports = { extractInputs, isCheckRequest, CATEGORIES, GROUPS, SECTIONS, norm, parseCourseList, resolveDepartment, parseYear, getRequirementItems,
   checkGraduation, formatResultText, compactRequirements, buildIndex, search, detectProfile, KINDS };

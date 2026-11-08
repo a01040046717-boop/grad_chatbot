@@ -575,6 +575,19 @@ function keyLines(q, hits, n = 5) {
   return cand.filter((x) => x.s >= cut && !seen.has(x.t) && seen.add(x.t)).slice(0, n);
 }
 
+function bestLineScore(q, c) {
+  const qv = INDEX.vec(charWbNgrams(q.replace(/(\d{2,4})\s*학번/g, "")));
+  let best = 0;
+  for (const line of c.text.split("\n")) {
+    const t = line.replace(/^-\s*/, "").trim();
+    if (t.length < 4 || /^(#|\[.*\]$|출처)/.test(t)) continue;
+    const lv = INDEX.vec(charWbNgrams(t)); let sc = 0;
+    for (const [g, w] of qv) { const x = lv.get(g); if (x) sc += x * w; }
+    if (sc > best) best = sc;
+  }
+  return best;
+}
+
 function autoJudgeMarkdown(auto) {
   const r = auto.res, cols = GROUPS.flatMap((g) => Object.keys(r.matrix[g]).map((c) => [g, c]));
   const L = [`**말씀하신 내용으로 계산한 졸업인증 판정** (${r.department} ${r.year}학번)`,
@@ -620,7 +633,9 @@ function offlineAnswer(q, hits, auto, footer = true) {
   // 공식안내 문서(.md) 섹션이 상위에 걸리면 그 섹션 전체(표 포함)를 보여준다
   const isMd = (loc) => hits.some((h) => h.chunk.location === loc && h.chunk.source.endsWith(".md"));
   const topScore = Math.max(...hits.map((h) => h.score));
-  const mdHit = hits.find((h) => h.chunk.source.endsWith(".md") && h.score >= 0.6 * topScore);
+  // 공식안내·추가자료 섹션 후보 중 '질문과 가장 잘 맞는 문장'을 가진 섹션을 고른다
+  const mdHit = hits.filter((h) => h.chunk.source.endsWith(".md") && h.score >= 0.5 * topScore)
+    .map((h) => [h, bestLineScore(q, h.chunk)]).sort((a, b) => b[1] - a[1]).map((x) => x[0])[0];
   if (mdHit) {
     const sec = mdHit.chunk;
     const other = lines.filter((l) => !isMd(l.loc)).slice(0, 2);
